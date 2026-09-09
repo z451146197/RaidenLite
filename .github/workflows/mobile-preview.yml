@@ -33,17 +33,36 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
 
+      - name: Validate serialized project
+        shell: bash
+        run: node tools/check-project.cjs
+
+      - name: Restore Cocos CLI cache
+        id: cocos-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cocos-cli
+          key: cocos-cli-${{ runner.os }}-0.0.1-alpha.35-v1
+
       - name: Install Cocos CLI
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth 1 --branch 0.0.1-alpha.35 https://github.com/cocos/cocos-cli.git "$RUNNER_TEMP/cocos-cli"
-          cd "$RUNNER_TEMP/cocos-cli"
-          npm install -g node-gyp
-          npm run init
-          npm install
-          npm run download-tools
-          npm run build
+          CLI_DIR="$RUNNER_TEMP/cocos-cli"
+
+          if [ "${{ steps.cocos-cli-cache.outputs.cache-hit }}" != "true" ] || [ ! -f "$CLI_DIR/dist/cli.js" ]; then
+            rm -rf "$CLI_DIR"
+            git clone --depth 1 --branch 0.0.1-alpha.35 https://github.com/cocos/cocos-cli.git "$CLI_DIR"
+            cd "$CLI_DIR"
+            npm install -g node-gyp
+            npm run init
+            npm install
+            npm run download-tools
+            npm run build
+          else
+            cd "$CLI_DIR"
+            echo "Using cached Cocos CLI build."
+          fi
 
           # The alpha CLI can lose its executable bit after the TypeScript build.
           chmod +x dist/cli.js
