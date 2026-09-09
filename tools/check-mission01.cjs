@@ -8,6 +8,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const timeline = read('assets/scripts/game/Mission01Timeline.ts');
 const background = read('assets/scripts/background/StarField.ts');
 const boss = read('assets/scripts/enemy/Boss.ts');
+const gameManager = read('assets/scripts/game/GameManager.ts');
 const wingmen = read('assets/scripts/Mission01Wingmen.ts');
 
 const eventTimes = [...timeline.matchAll(/\{\s*time:\s*(\d+(?:\.\d+)?),\s*kind:/g)]
@@ -32,7 +33,6 @@ const requiredStoryCues = [
 ];
 for (const cue of requiredStoryCues) {
     const uses = [...timeline.matchAll(new RegExp(`cue:\\s*'${cue}'`, 'g'))];
-    // cue 在类型声明出现一次、在时间轴事件出现一次。
     assert.equal(uses.length, 1, `Expected exactly one timeline event for ${cue}, got ${uses.length}`);
 }
 
@@ -48,4 +48,14 @@ assert.ok(background.includes('handoffGoliathVisualTo'), 'Missing GOLIATH visual
 assert.ok(boss.includes('handoffGoliathVisualTo(this.node)'), 'Boss no longer adopts grounded GOLIATH visual');
 assert.ok(wingmen.includes("storyTime('VIPER_DAMAGED', 143)"), 'VIPER withdrawal cue is not wired');
 
-console.log(`PASS: Mission 01 has ${eventTimes.length} ordered events, six background stages, wingman loss/withdrawal cues, and grounded GOLIATH handoff.`);
+// Boss 死亡必须保留同一视觉节点完成程序演出，不能在 takeDamage() 中直接销毁。
+const takeDamageBody = boss.match(/public takeDamage\([\s\S]*?\n    \}/)?.[0] ?? '';
+assert.ok(takeDamageBody, 'Boss.takeDamage() not found');
+assert.ok(!takeDamageBody.includes('this.node.destroy()'),
+    'Boss.takeDamage() must not destroy GOLIATH before the death presentation completes');
+assert.ok(gameManager.includes("'BOSS_DYING'"), 'Missing explicit BOSS_DYING game state');
+assert.ok(gameManager.includes('beginBossDeathSequence()'), 'Missing GOLIATH death sequence entry point');
+assert.ok(gameManager.includes('BOSS_DEATH_EXPLOSIONS'), 'Missing timed GOLIATH explosion mounts');
+assert.ok(gameManager.includes('this.finishLevel();'), 'GOLIATH death sequence no longer reaches level clear');
+
+console.log(`PASS: Mission 01 has ${eventTimes.length} ordered events, six background stages, wingman loss/withdrawal cues, grounded GOLIATH handoff, and staged boss death.`);
