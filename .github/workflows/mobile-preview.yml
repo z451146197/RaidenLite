@@ -6,16 +6,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: mobile-web-preview
   cancel-in-progress: true
 
 jobs:
-  build-and-publish:
+  build-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout game project
@@ -61,18 +66,21 @@ jobs:
 
           touch build/web-mobile/.nojekyll
 
-      - name: Upload preview artifact
+      - name: Keep downloadable build artifact
         uses: actions/upload-artifact@v4
         with:
           name: RaidenLite-web-mobile
           path: build/web-mobile
           if-no-files-found: error
 
-      - name: Publish to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build/web-mobile
-          publish_branch: gh-pages
-          force_orphan: true
-          enable_jekyll: false
+          path: build/web-mobile
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
