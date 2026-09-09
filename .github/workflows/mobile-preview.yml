@@ -41,7 +41,7 @@ jobs:
           cd "$RUNNER_TEMP/cocos-cli"
           npm install -g node-gyp
           npm run init
-          npm ci
+          npm install
           npm run download-tools
           npm run build
           npm link
