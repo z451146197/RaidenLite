@@ -22,13 +22,7 @@ export type Mission01Event =
     | { time: number; kind: 'WARNING' }
     | { time: number; kind: 'BOSS' };
 
-/**
- * Mission 01 的唯一时间轴数据源。
- *
- * 这里刻意只描述“何时发生什么”，不直接操作 Cocos 节点。后续 WingmanController、
- * DialogueController、BackgroundController 和 GoliathSequence 都消费同一份数据，
- * 避免把剧情秒点散落到多个脚本里。
- */
+/** Mission 01 的唯一时间轴数据源：只描述“何时发生什么”。 */
 export const MISSION01_TIMELINE: readonly Mission01Event[] = [
     { time: 0, kind: 'STORY', cue: 'MISSION_OPEN' },
     { time: 0, kind: 'SCROLL', speedScale: 0.18, transition: 0 },
@@ -56,7 +50,6 @@ export const MISSION01_TIMELINE: readonly Mission01Event[] = [
     { time: 90, kind: 'ELITE', x: -210, dropKind: 'P', heavyBullet: true },
     { time: 96, kind: 'WAVE', pattern: 'V', count: 9, canShoot: true },
 
-    // 僚机剧情事件先进入统一时间轴；视觉实现由 WingmanController 接管。
     { time: 98, kind: 'STORY', cue: 'FALCON_TARGETED' },
     { time: 102, kind: 'WAVE', pattern: 'DIAGONAL_CROSS', count: 10, canShoot: true },
     { time: 108, kind: 'STORY', cue: 'FALCON_DAMAGED' },
@@ -66,9 +59,11 @@ export const MISSION01_TIMELINE: readonly Mission01Event[] = [
     { time: 120, kind: 'ELITE', x: 0, dropKind: 'B', heavyBullet: true },
     { time: 126, kind: 'WAVE', pattern: 'LINE', count: 8, canShoot: true },
 
+    // GroundF / GOLIATH 平台进入镜头后减速，给“背景设施 -> Boss”转场留空间。
     { time: 133, kind: 'STORY', cue: 'BOSS_PREPARE' },
     { time: 133, kind: 'SCROLL', speedScale: 0.62, transition: 3.0 },
     { time: 141, kind: 'WARNING' },
+    { time: 146, kind: 'SCROLL', speedScale: 0.28, transition: 2.0 },
     { time: 146, kind: 'STORY', cue: 'GOLIATH_ENTER' },
     { time: 146, kind: 'BOSS' },
 ];

@@ -1,4 +1,5 @@
-import { _decorator, Color, Component, Sprite, UITransform } from 'cc';
+import { _decorator, Color, Component, director, Sprite, UITransform } from 'cc';
+import { StarField } from '../background/StarField';
 import { applyArtSprite } from '../game/ArtUtil';
 
 const { ccclass } = _decorator;
@@ -21,8 +22,16 @@ export class Boss extends Component {
         if (!transform) transform = this.node.addComponent(UITransform);
         transform.setContentSize(this.halfWidth * 2, this.halfHeight * 2);
 
-        const art = applyArtSprite(this.node, 'art/boss', 285, 250, '__BossArt', 255);
+        // Mission 01 优先接管 GroundF 上已经存在的同一个 GOLIATH Sprite。
+        // 如果背景挂点不存在（例如单独测试 Boss），再退回普通资源创建路径。
+        const background = director.getScene()?.getComponentInChildren(StarField) ?? null;
+        const adopted = background?.handoffGoliathVisualTo(this.node) ?? false;
+        const existingArt = this.node.getChildByName('__BossArt');
+        const art = existingArt ?? applyArtSprite(this.node, 'art/boss', 285, 250, '__BossArt', 255);
         art.angle = 180;
+        if (adopted) {
+            art.setScale(1.02, 1.02, 1);
+        }
     }
 
     public flashHit() {
