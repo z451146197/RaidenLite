@@ -25,17 +25,14 @@ import { Boss } from '../enemy/Boss';
 import { Enemy, EnemyMovePattern, EnemySetup } from '../enemy/Enemy';
 import { PowerItem, ItemKind } from '../item/PowerItem';
 import { Explosion } from '../effect/Explosion';
+import { StarField } from '../background/StarField';
 import { registerArtFrames, applyArtSprite } from './ArtUtil';
+import { MISSION01_TIMELINE, Mission01Event, Mission01StoryCue } from './Mission01Timeline';
 
 const { ccclass, property, executionOrder } = _decorator;
 
 type GameState = 'PLAYING' | 'WARNING' | 'BOSS' | 'GAME_OVER' | 'CLEAR';
 type WeaponKind = 'NORMAL' | 'SPREAD' | 'LASER';
-
-interface LevelEvent {
-    time: number;
-    run: () => void;
-}
 
 @ccclass('GameManager')
 @executionOrder(-100)
@@ -60,7 +57,9 @@ export class GameManager extends Component {
     private score = 0;
     private levelTime = 0;
     private nextLevelEvent = 0;
-    private levelEvents: LevelEvent[] = [];
+    private playerControlEnabled = false;
+    private playerAutoFireEnabled = false;
+    private background: StarField | null = null;
 
     private currentWeapon: WeaponKind = 'NORMAL';
     private spreadUnlocked = false;
@@ -125,7 +124,6 @@ export class GameManager extends Component {
         profiler.hideStats();
         this.bindUI();
         this.buildBossHpBar();
-        this.buildLevelTimeline();
         this.assetsReady = !!(this.playerNode && this.gameplayRoot && this.uiRoot && this.bulletLayer
             && this.enemyLayer && this.bossLayer && this.enemyBulletLayer && this.itemLayer
             && this.bulletPrefab && this.enemyPrefab);
@@ -134,16 +132,28 @@ export class GameManager extends Component {
             this.showAnnouncement('场景引用缺失，请重新打开 Game.scene', 60);
             return;
         }
+
+        const scene = director.getScene();
+        this.background = scene?.getComponentInChildren(StarField) ?? null;
+        if (!this.background) {
+            console.warn('[RaidenLite] 未找到 StarField，Mission 01 背景速度事件将被忽略。');
+        }
+
+        this.playerControlEnabled = false;
+        this.playerAutoFireEnabled = false;
         this.invulnerableTimer = 2;
         if (this.gameplayRoot) {
             this.gameplayOrigin.set(this.gameplayRoot.position.x, this.gameplayRoot.position.y, this.gameplayRoot.position.z);
         }
-        this.showAnnouncement('海岸防线 · 拖动移动 / 自动射击', 3);
+        this.showAnnouncement('AEGIS // 飞行组待命', 2.2);
         this.refreshHUD();
     }
 
     public get canControl(): boolean {
-        return this.assetsReady && this.gameState !== 'GAME_OVER' && this.gameState !== 'CLEAR';
+        return this.assetsReady
+            && this.playerControlEnabled
+            && this.gameState !== 'GAME_OVER'
+            && this.gameState !== 'CLEAR';
     }
 
     update(deltaTime: number) {
@@ -172,11 +182,15 @@ export class GameManager extends Component {
         this.levelTime += deltaTime;
         this.runLevelTimeline();
 
-        this.shootTimer += deltaTime;
-        const interval = this.getShootInterval();
-        while (this.shootTimer >= interval) {
-            this.shootTimer -= interval;
-            this.shootPlayerWeapon();
+        if (this.playerAutoFireEnabled) {
+            this.shootTimer += deltaTime;
+            const interval = this.getShootInterval();
+            while (this.shootTimer >= interval) {
+                this.shootTimer -= interval;
+                this.shootPlayerWeapon();
+            }
+        } else {
+            this.shootTimer = 0;
         }
 
         this.tickEnemyShooting(deltaTime);
@@ -193,40 +207,94 @@ export class GameManager extends Component {
 
     // ---------- 第一关时间轴 ----------
 
-    private buildLevelTimeline() {
-        const add = (time: number, run: () => void) => this.levelEvents.push({ time, run });
-
-        add(1, () => this.spawnLineWave(4, false));
-        add(5, () => this.spawnLineWave(5, false));
-        add(9, () => this.spawnDiagonalCross(6, false));
-        add(13, () => this.spawnElite(-180, 'P', false));
-        add(17, () => this.spawnLineWave(5, true));
-        add(22, () => this.spawnVWave(7, true));
-        add(28, () => this.spawnElite(170, 'S', false));
-        add(32, () => this.spawnDiagonalCross(8, true));
-        add(37, () => this.spawnSineWave(5, true));
-        add(41, () => this.spawnElite(0, null, true));
-        add(45, () => this.spawnElite(-210, 'P', true));
-        add(49, () => this.spawnVWave(9, true));
-        add(53, () => this.spawnDiagonalCross(10, true));
-        add(56, () => this.spawnElite(190, 'L', true));
-        add(60, () => this.spawnSineWave(7, true));
-        add(64, () => this.spawnElite(0, 'B', true));
-        add(67, () => this.spawnLineWave(8, true));
-        add(70, () => this.beginBossWarning());
-        add(73, () => this.spawnBoss());
-
-        this.levelEvents.sort((a, b) => a.time - b.time);
-    }
-
     private runLevelTimeline() {
-        while (this.nextLevelEvent < this.levelEvents.length) {
-            const event = this.levelEvents[this.nextLevelEvent];
+        while (this.nextLevelEvent < MISSION01_TIMELINE.length) {
+            const event = MISSION01_TIMELINE[this.nextLevelEvent];
             if (this.levelTime < event.time) {
                 break;
             }
             this.nextLevelEvent += 1;
-            event.run();
+            this.handleMission01Event(event);
+        }
+    }
+
+    private handleMission01Event(event: Mission01Event) {
+        switch (event.kind) {
+            case 'SCROLL':
+                this.background?.setScrollSpeedScale(event.speedScale, event.transition);
+                break;
+            case 'CONTROL':
+                this.playerControlEnabled = event.enabled;
+                this.playerAutoFireEnabled = event.autoFire;
+                if (event.enabled) {
+                    this.invulnerableTimer = Math.max(this.invulnerableTimer, 2);
+                }
+                break;
+            case 'WAVE':
+                this.spawnTimelineWave(event);
+                break;
+            case 'ELITE':
+                this.spawnElite(event.x, event.dropKind as ItemKind | null, event.heavyBullet);
+                break;
+            case 'WARNING':
+                this.beginBossWarning();
+                break;
+            case 'BOSS':
+                this.spawnBoss();
+                break;
+            case 'STORY':
+                this.handleStoryCue(event.cue);
+                break;
+        }
+    }
+
+    private spawnTimelineWave(event: Extract<Mission01Event, { kind: 'WAVE' }>) {
+        switch (event.pattern) {
+            case 'LINE':
+                this.spawnLineWave(event.count, event.canShoot);
+                break;
+            case 'V':
+                this.spawnVWave(event.count, event.canShoot);
+                break;
+            case 'DIAGONAL_CROSS':
+                this.spawnDiagonalCross(event.count, event.canShoot);
+                break;
+            case 'SINE':
+                this.spawnSineWave(event.count, event.canShoot);
+                break;
+        }
+    }
+
+    private handleStoryCue(cue: Mission01StoryCue) {
+        switch (cue) {
+            case 'MISSION_OPEN':
+                this.showAnnouncement('AEGIS // AURORA 是现在我们唯一可以驾驶的战机之一', 4.0);
+                break;
+            case 'FORMATION_RUNWAY':
+                this.showAnnouncement('AEGIS // VIPER、FALCON，编队进入跑道', 3.0);
+                break;
+            case 'TAKEOFF':
+                this.showAnnouncement('AEGIS // AURORA，准许起飞', 2.5);
+                this.shakeScreen(0.8, 3.5);
+                break;
+            case 'PLAYER_CONTROL':
+                this.showAnnouncement('CONTROL ONLINE · 拖动移动 / 自动射击', 3.0);
+                break;
+            case 'AEGIS_REVEAL':
+                this.showAnnouncement('AEGIS // 敌机群进入拦截区', 2.2);
+                break;
+            case 'BOSS_PREPARE':
+                this.showAnnouncement('AEGIS // 基地大型目标正在启动', 2.8);
+                break;
+            case 'GOLIATH_ENTER':
+                this.showAnnouncement('GOLIATH // TARGET CONFIRMED', 2.0);
+                break;
+            case 'FALCON_TARGETED':
+            case 'FALCON_DAMAGED':
+            case 'FALCON_DESTROYED':
+                // 僚机节点还未接入场景；先保留标准 cue，避免在 GameManager 里硬编码未来演出。
+                console.info(`[Mission01] pending wingman cue: ${cue}`);
+                break;
         }
     }
 
