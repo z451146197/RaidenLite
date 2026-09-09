@@ -44,7 +44,12 @@ jobs:
           npm install
           npm run download-tools
           npm run build
+
+          # tsc outputs dist/cli.js without the executable bit on Linux.
+          # npm link creates the global `cocos` symlink but does not fix the target mode.
+          chmod +x dist/cli.js
           npm link
+          chmod +x "$(npm prefix -g)/bin/cocos" || true
           cocos --version || cocos --help
 
       - name: Build Web Mobile
