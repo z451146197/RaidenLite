@@ -1,0 +1,78 @@
+name: Build Mobile Web Preview
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-web-preview
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout game project
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+          cache: npm
+          cache-dependency-path: package.json
+
+      - name: Install Cocos CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch 0.0.1-alpha.35 https://github.com/cocos/cocos-cli.git "$RUNNER_TEMP/cocos-cli"
+          cd "$RUNNER_TEMP/cocos-cli"
+          npm install -g node-gyp
+          npm run init
+          npm ci
+          npm run download-tools
+          npm run build
+          npm link
+          cocos --version || cocos --help
+
+      - name: Build Web Mobile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf build/web-mobile
+          if ! cocos --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile --config "$GITHUB_WORKSPACE/tools/build-preview.json"; then
+            echo "Config-file build failed; retrying with project/platform defaults."
+            rm -rf build/web-mobile
+            cocos --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile
+          fi
+
+          if [ ! -f build/web-mobile/index.html ]; then
+            echo "Expected build/web-mobile/index.html was not produced."
+            find build -maxdepth 3 -type f | sort | head -200 || true
+            exit 1
+          fi
+
+          touch build/web-mobile/.nojekyll
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RaidenLite-web-mobile
+          path: build/web-mobile
+          if-no-files-found: error
+
+      - name: Publish to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web-mobile
+          publish_branch: gh-pages
+          force_orphan: true
+          enable_jekyll: false
