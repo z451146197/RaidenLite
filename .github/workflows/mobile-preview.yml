@@ -39,7 +39,7 @@ jobs:
 
       - name: Restore Cocos CLI cache
         id: cocos-cli-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/cocos-cli
           key: cocos-cli-${{ runner.os }}-0.0.1-alpha.35-v1
@@ -69,6 +69,13 @@ jobs:
           npm link
           chmod +x "$(npm prefix -g)/bin/cocos" || true
           cocos --version || cocos --help
+
+      - name: Save Cocos CLI cache
+        if: steps.cocos-cli-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/cocos-cli
+          key: cocos-cli-${{ runner.os }}-0.0.1-alpha.35-v1
 
       - name: Build Web Mobile
         shell: bash
