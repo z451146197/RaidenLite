@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 45
     environment:
       name: github-pages
@@ -45,8 +45,7 @@ jobs:
           npm run download-tools
           npm run build
 
-          # tsc outputs dist/cli.js without the executable bit on Linux.
-          # npm link creates the global `cocos` symlink but does not fix the target mode.
+          # The alpha CLI can lose its executable bit after the TypeScript build.
           chmod +x dist/cli.js
           npm link
           chmod +x "$(npm prefix -g)/bin/cocos" || true
