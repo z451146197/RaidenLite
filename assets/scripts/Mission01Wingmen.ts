@@ -43,7 +43,7 @@ function storyTime(cue: Mission01StoryCue, fallback: number) {
  * Mission 01 僚机程序演出。
  *
  * V1 暂时复用 AURORA 静态 Sprite 作为 VIPER / FALCON 占位，靠尺寸与色调区分；
- * 以后有独立静态机体时只替换 resourcePath，不改编队、受损、坠毁逻辑。
+ * 正式静态机体到位后只替换 resourcePath，不改编队、受损、坠毁和撤退逻辑。
  */
 @ccclass('Mission01Wingmen')
 export class Mission01Wingmen extends Component {
@@ -51,9 +51,12 @@ export class Mission01Wingmen extends Component {
     private viper: WingmanVisual | null = null;
     private falcon: WingmanVisual | null = null;
     private smoke: SmokePuff[] = [];
-    private smokeTimer = 0;
+    private falconSmokeTimer = 0;
+    private viperSmokeTimer = 0;
     private falconHitPlayed = false;
     private falconDeathStarted = false;
+    private viperHitPlayed = false;
+    private viperWithdrawn = false;
 
     private readonly formationTime = storyTime('FORMATION_RUNWAY', 6);
     private readonly takeoffTime = storyTime('TAKEOFF', 14);
@@ -61,6 +64,7 @@ export class Mission01Wingmen extends Component {
     private readonly falconTargetedTime = storyTime('FALCON_TARGETED', 98);
     private readonly falconDamagedTime = storyTime('FALCON_DAMAGED', 108);
     private readonly falconDestroyedTime = storyTime('FALCON_DESTROYED', 117);
+    private readonly viperDamagedTime = storyTime('VIPER_DAMAGED', 143);
 
     start() {
         const parent = this.node.parent;
@@ -86,7 +90,7 @@ export class Mission01Wingmen extends Component {
         parent.addChild(wing);
         wing.addComponent(UITransform).setContentSize(86, 172);
         const art = applyArtSprite(wing, 'art/player', 86, 172, '__WingmanArt', 235, () => {
-            // applyArtSprite 在缓存命中时会同步触发回调，因此不能闭包引用尚未完成赋值的 art 常量。
+            // 缓存命中时回调可能同步执行，所以从 wing 节点重新取 Sprite，避免 TDZ。
             const sprite = wing.getChildByName('__WingmanArt')?.getComponent(Sprite);
             if (sprite) sprite.color = tint;
         });
@@ -124,52 +128,88 @@ export class Mission01Wingmen extends Component {
         const airborne = smoothstep((this.elapsed - this.takeoffTime) / Math.max(0.1, this.controlTime - this.takeoffTime));
         const formation = smoothstep((this.elapsed - this.formationTime) / Math.max(0.1, this.takeoffTime - this.formationTime));
 
-        if (this.viper) {
-            const desiredX = player.x - (126 - formation * 14);
-            const desiredY = player.y - (88 - formation * 24);
-            this.follow(this.viper, desiredX, desiredY, dt, 5.5);
-            this.viper.rotation += (0 - this.viper.rotation) * Math.min(1, dt * 7);
-            this.applyWingmanTransform(this.viper, airborne);
-        }
+        this.updateViper(player.x, player.y, airborne, formation, dt);
+        this.updateFalcon(player.x, player.y, airborne, formation, dt);
+    }
 
-        if (this.falcon && !this.falconDeathStarted) {
-            let desiredX = player.x + (126 - formation * 14);
-            let desiredY = player.y - (88 - formation * 24);
-            let followRate = 5.5;
-            let targetRotation = 0;
+    private updateViper(playerX: number, playerY: number, airborne: number, formation: number, dt: number) {
+        if (!this.viper || this.viperWithdrawn) return;
 
-            if (this.elapsed >= this.falconTargetedTime && this.elapsed < this.falconDamagedTime) {
-                const attack = smoothstep((this.elapsed - this.falconTargetedTime)
-                    / Math.max(0.1, this.falconDamagedTime - this.falconTargetedTime));
-                desiredX = player.x + 112 + attack * 92;
-                desiredY = player.y - 64 + Math.sin(attack * Math.PI) * 150;
-                targetRotation = -5 - attack * 7;
-                followRate = 4.2;
+        let desiredX = playerX - (126 - formation * 14);
+        let desiredY = playerY - (88 - formation * 24);
+        let targetRotation = 0;
+        let followRate = 5.5;
+
+        if (this.elapsed >= this.viperDamagedTime) {
+            if (!this.viperHitPlayed) {
+                this.viperHitPlayed = true;
+                this.spawnExplosion(this.viper.node.position.x - 24, this.viper.node.position.y + 16, 42);
             }
 
-            if (this.elapsed >= this.falconDamagedTime) {
-                if (!this.falconHitPlayed) {
-                    this.falconHitPlayed = true;
-                    this.spawnExplosion(this.falcon.node.position.x + 24, this.falcon.node.position.y + 18, 34);
-                }
-                const damagedFor = this.elapsed - this.falconDamagedTime;
-                desiredX = player.x + 185 + damagedFor * 18;
-                desiredY = player.y - 50 - damagedFor * 42;
-                targetRotation = -12 - damagedFor * 8;
-                followRate = 2.0;
-                this.smokeTimer -= dt;
-                if (this.smokeTimer <= 0) {
-                    this.smokeTimer = 0.12;
-                    this.spawnSmoke(this.falcon.node.position.x + 16, this.falcon.node.position.y - 55);
-                }
+            const damagedFor = this.elapsed - this.viperDamagedTime;
+            desiredX = playerX - 118 - damagedFor * 190;
+            desiredY = playerY - 54 + damagedFor * 58;
+            targetRotation = 11 + damagedFor * 8;
+            followRate = 3.1;
+
+            this.viperSmokeTimer -= dt;
+            if (this.viperSmokeTimer <= 0) {
+                this.viperSmokeTimer = 0.11;
+                this.spawnSmoke(this.viper.node.position.x - 18, this.viper.node.position.y - 52);
             }
 
-            this.follow(this.falcon, desiredX, desiredY, dt, followRate);
-            this.falcon.rotation += (targetRotation - this.falcon.rotation) * Math.min(1, dt * 5.5);
-            this.applyWingmanTransform(this.falcon, airborne);
+            if (damagedFor >= 2.9) {
+                this.viperWithdrawn = true;
+                this.viper.node.active = false;
+                this.viper.shadow.active = false;
+                return;
+            }
         }
 
-        if (!this.falconDeathStarted && this.elapsed >= this.falconDestroyedTime && this.falcon) {
+        this.follow(this.viper, desiredX, desiredY, dt, followRate);
+        this.viper.rotation += (targetRotation - this.viper.rotation) * Math.min(1, dt * 6);
+        this.applyWingmanTransform(this.viper, airborne);
+    }
+
+    private updateFalcon(playerX: number, playerY: number, airborne: number, formation: number, dt: number) {
+        if (!this.falcon || this.falconDeathStarted) return;
+
+        let desiredX = playerX + (126 - formation * 14);
+        let desiredY = playerY - (88 - formation * 24);
+        let followRate = 5.5;
+        let targetRotation = 0;
+
+        if (this.elapsed >= this.falconTargetedTime && this.elapsed < this.falconDamagedTime) {
+            const attack = smoothstep((this.elapsed - this.falconTargetedTime)
+                / Math.max(0.1, this.falconDamagedTime - this.falconTargetedTime));
+            desiredX = playerX + 112 + attack * 92;
+            desiredY = playerY - 64 + Math.sin(attack * Math.PI) * 150;
+            targetRotation = -5 - attack * 7;
+            followRate = 4.2;
+        }
+
+        if (this.elapsed >= this.falconDamagedTime) {
+            if (!this.falconHitPlayed) {
+                this.falconHitPlayed = true;
+                this.spawnExplosion(this.falcon.node.position.x + 24, this.falcon.node.position.y + 18, 34);
+            }
+            const damagedFor = this.elapsed - this.falconDamagedTime;
+            desiredX = playerX + 185 + damagedFor * 18;
+            desiredY = playerY - 50 - damagedFor * 42;
+            targetRotation = -12 - damagedFor * 8;
+            followRate = 2.0;
+            this.falconSmokeTimer -= dt;
+            if (this.falconSmokeTimer <= 0) {
+                this.falconSmokeTimer = 0.12;
+                this.spawnSmoke(this.falcon.node.position.x + 16, this.falcon.node.position.y - 55);
+            }
+        }
+
+        this.follow(this.falcon, desiredX, desiredY, dt, followRate);
+        this.falcon.rotation += (targetRotation - this.falcon.rotation) * Math.min(1, dt * 5.5);
+        this.applyWingmanTransform(this.falcon, airborne);
+
+        if (this.elapsed >= this.falconDestroyedTime) {
             this.beginFalconDestruction();
         }
     }
@@ -192,7 +232,7 @@ export class Mission01Wingmen extends Component {
     }
 
     private beginFalconDestruction() {
-        if (!this.falcon) return;
+        if (!this.falcon || this.falconDeathStarted) return;
         this.falconDeathStarted = true;
         const falcon = this.falcon;
         const x = falcon.node.position.x;
@@ -220,7 +260,7 @@ export class Mission01Wingmen extends Component {
     private spawnSmoke(x: number, y: number) {
         const parent = this.node.parent;
         if (!parent) return;
-        const puff = new Node('FalconSmoke');
+        const puff = new Node('WingmanSmoke');
         puff.layer = this.node.layer;
         parent.addChild(puff);
         puff.setPosition(x, y, this.node.position.z);

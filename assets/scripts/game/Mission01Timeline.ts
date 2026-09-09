@@ -8,6 +8,7 @@ export type Mission01StoryCue =
     | 'FALCON_DAMAGED'
     | 'FALCON_DESTROYED'
     | 'BOSS_PREPARE'
+    | 'VIPER_DAMAGED'
     | 'GOLIATH_ENTER';
 
 export type Mission01WavePattern = 'LINE' | 'V' | 'DIAGONAL_CROSS' | 'SINE';
@@ -63,6 +64,7 @@ export const MISSION01_TIMELINE: readonly Mission01Event[] = [
     { time: 133, kind: 'STORY', cue: 'BOSS_PREPARE' },
     { time: 133, kind: 'SCROLL', speedScale: 0.62, transition: 3.0 },
     { time: 141, kind: 'WARNING' },
+    { time: 143, kind: 'STORY', cue: 'VIPER_DAMAGED' },
     { time: 146, kind: 'SCROLL', speedScale: 0.28, transition: 2.0 },
     { time: 146, kind: 'STORY', cue: 'GOLIATH_ENTER' },
     { time: 146, kind: 'BOSS' },
