@@ -1,5 +1,6 @@
 import { _decorator, Component, Sprite } from 'cc';
 import { applyArtSprite } from './game/ArtUtil';
+import { Mission01Wingmen } from './Mission01Wingmen';
 import { PlayerFlightPresentation } from './PlayerFlightPresentation';
 const { ccclass } = _decorator;
 
@@ -11,6 +12,9 @@ export class PlayerView extends Component {
         }
         if (!this.node.getComponent(PlayerFlightPresentation)) {
             this.node.addComponent(PlayerFlightPresentation);
+        }
+        if (!this.node.getComponent(Mission01Wingmen)) {
+            this.node.addComponent(Mission01Wingmen);
         }
     }
 }
