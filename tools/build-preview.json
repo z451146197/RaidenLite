@@ -1,0 +1,12 @@
+{
+  "name": "RaidenLite",
+  "platform": "web-mobile",
+  "buildPath": "project://build",
+  "outputName": "web-mobile",
+  "startScene": "20cb21a7-6956-4769-9e3d-9b1d0a85e4db",
+  "scenes": [{ "url": "db://assets/Game.scene", "uuid": "20cb21a7-6956-4769-9e3d-9b1d0a85e4db" }],
+  "debug": true,
+  "sourceMaps": true,
+  "md5Cache": false,
+  "packages": { "web-mobile": { "orientation": "portrait" } }
+}
