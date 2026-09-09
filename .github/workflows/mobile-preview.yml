@@ -33,9 +33,11 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
 
-      - name: Validate serialized project
+      - name: Validate project sources
         shell: bash
-        run: node tools/check-project.cjs
+        run: |
+          node tools/check-project.cjs
+          node tools/check-mission01.cjs
 
       - name: Restore Cocos CLI cache
         id: cocos-cli-cache
