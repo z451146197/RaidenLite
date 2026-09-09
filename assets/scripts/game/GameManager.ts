@@ -31,8 +31,18 @@ import { MISSION01_TIMELINE, Mission01Event, Mission01StoryCue } from './Mission
 
 const { ccclass, property, executionOrder } = _decorator;
 
-type GameState = 'PLAYING' | 'WARNING' | 'BOSS' | 'GAME_OVER' | 'CLEAR';
+type GameState = 'PLAYING' | 'WARNING' | 'BOSS' | 'BOSS_DYING' | 'GAME_OVER' | 'CLEAR';
 type WeaponKind = 'NORMAL' | 'SPREAD' | 'LASER';
+
+const BOSS_DEATH_EXPLOSIONS = [
+    { time: 0.22, x: -72, y: -28, size: 52 },
+    { time: 0.48, x: 58, y: 36, size: 58 },
+    { time: 0.72, x: -38, y: 44, size: 66 },
+    { time: 0.96, x: 82, y: -18, size: 72 },
+    { time: 1.25, x: -12, y: -6, size: 92 },
+    { time: 1.55, x: 34, y: 18, size: 108 },
+    { time: 1.78, x: 0, y: 0, size: 156 },
+] as const;
 
 @ccclass('GameManager')
 @executionOrder(-100)
@@ -91,6 +101,10 @@ export class GameManager extends Component {
     private boss: Boss | null = null;
     private bossShotTimer = 1.2;
     private bossPatternIndex = 0;
+    private bossDeathTimer = 0;
+    private bossDeathStep = 0;
+    private bossDeathOrigin = new Vec3();
+    private bossDeathHidden = false;
 
     private shakeTimer = 0;
     private shakeAmplitude = 0;
@@ -152,6 +166,7 @@ export class GameManager extends Component {
     public get canControl(): boolean {
         return this.assetsReady
             && this.playerControlEnabled
+            && this.gameState !== 'BOSS_DYING'
             && this.gameState !== 'GAME_OVER'
             && this.gameState !== 'CLEAR';
     }
@@ -166,6 +181,10 @@ export class GameManager extends Component {
             return;
         }
         if (!this.assetsReady || !this.playerNode || !isValid(this.playerNode, true)) {
+            return;
+        }
+        if (this.gameState === 'BOSS_DYING') {
+            this.updateBossDeathSequence(deltaTime);
             return;
         }
 
@@ -292,8 +311,9 @@ export class GameManager extends Component {
             case 'FALCON_TARGETED':
             case 'FALCON_DAMAGED':
             case 'FALCON_DESTROYED':
-                // 僚机节点还未接入场景；先保留标准 cue，避免在 GameManager 里硬编码未来演出。
-                console.info(`[Mission01] pending wingman cue: ${cue}`);
+            case 'VIPER_DAMAGED':
+                // 僚机视觉由 Mission01Wingmen 消费同一 cue；GameManager 不重复硬编码演出。
+                console.info(`[Mission01] wingman cue: ${cue}`);
                 break;
         }
     }
@@ -703,9 +723,7 @@ export class GameManager extends Component {
             this.boss.flashHit();
             if (this.boss.takeDamage(bullet.damage)) {
                 this.addScore(this.boss.scoreValue);
-                this.spawnExplosion(bossPos.x, bossPos.y, 130, new Color(255, 200, 140, 255));
-                this.shakeScreen(0.55, 14);
-                this.finishLevel();
+                this.beginBossDeathSequence();
                 return;
             }
             this.refreshBossHP();
@@ -846,7 +864,8 @@ export class GameManager extends Component {
     }
 
     public useBomb() {
-        if (this.bombs <= 0 || this.gameState === 'GAME_OVER' || this.gameState === 'CLEAR') {
+        if (this.bombs <= 0 || this.gameState === 'BOSS_DYING'
+            || this.gameState === 'GAME_OVER' || this.gameState === 'CLEAR') {
             return;
         }
         this.bombs -= 1;
@@ -859,25 +878,111 @@ export class GameManager extends Component {
             }
         }
         if (this.boss && !this.boss.dead && isValid(this.boss.node, true)) {
-            const bossPos = this.boss.node.position;
             this.boss.flashHit();
             if (this.boss.takeDamage(18)) {
                 this.addScore(this.boss.scoreValue);
-                this.spawnExplosion(bossPos.x, bossPos.y, 130, new Color(255, 200, 140, 255));
-                this.shakeScreen(0.55, 14);
-                this.finishLevel();
+                this.beginBossDeathSequence();
             } else {
                 this.refreshBossHP();
             }
         }
 
-        this.shakeScreen(0.32, 10);
-        this.bombFlashTimer = 0.25;
-        if (this.bombFlashNode) {
-            this.bombFlashNode.active = true;
+        if (this.gameState !== 'BOSS_DYING') {
+            this.shakeScreen(0.32, 10);
+            this.bombFlashTimer = 0.25;
+            if (this.bombFlashNode) {
+                this.bombFlashNode.active = true;
+            }
+            this.showAnnouncement('BOMB!', 0.8);
         }
-        this.showAnnouncement('BOMB!', 0.8);
         this.refreshHUD();
+    }
+
+    // ---------- Boss 死亡演出 ----------
+
+    private beginBossDeathSequence() {
+        if (!this.boss || !isValid(this.boss.node, true) || this.gameState === 'BOSS_DYING') {
+            return;
+        }
+
+        this.gameState = 'BOSS_DYING';
+        this.playerControlEnabled = false;
+        this.playerAutoFireEnabled = false;
+        this.shootTimer = 0;
+        this.bossDeathTimer = 0;
+        this.bossDeathStep = 0;
+        this.bossDeathHidden = false;
+        this.bossDeathOrigin.set(this.boss.node.position.x, this.boss.node.position.y, this.boss.node.position.z);
+        this.boss.enabled = false;
+
+        this.clearEnemyBullets();
+        for (const bullet of this.bullets) {
+            if (!bullet.dead && isValid(bullet.node, true)) {
+                bullet.destroySelf();
+            }
+        }
+
+        if (this.bossHpNode) {
+            this.bossHpNode.active = false;
+        }
+        this.showAnnouncement('GOLIATH // CORE FAILURE', 1.4);
+        this.spawnExplosion(
+            this.bossDeathOrigin.x + 54,
+            this.bossDeathOrigin.y + 26,
+            48,
+            new Color(255, 185, 105, 255),
+        );
+        this.shakeScreen(0.35, 7);
+    }
+
+    private updateBossDeathSequence(deltaTime: number) {
+        if (!this.boss || !isValid(this.boss.node, true)) {
+            this.finishLevel();
+            return;
+        }
+
+        this.bossDeathTimer += deltaTime;
+        const t = this.bossDeathTimer;
+
+        // 机体本身只做轻微失稳；“破坏感”主要来自不同挂点的爆炸节奏。
+        if (!this.bossDeathHidden) {
+            const decay = Math.max(0.2, 1 - t / 2.3);
+            const jitterX = Math.sin(t * 37) * 6 * decay;
+            const jitterY = Math.sin(t * 29 + 0.8) * 4 * decay;
+            this.boss.node.setPosition(
+                this.bossDeathOrigin.x + jitterX,
+                this.bossDeathOrigin.y + jitterY,
+                this.bossDeathOrigin.z,
+            );
+            this.boss.node.angle = Math.sin(t * 18) * 2.2 * decay;
+        }
+
+        while (this.bossDeathStep < BOSS_DEATH_EXPLOSIONS.length
+            && t >= BOSS_DEATH_EXPLOSIONS[this.bossDeathStep].time) {
+            const event = BOSS_DEATH_EXPLOSIONS[this.bossDeathStep];
+            this.spawnExplosion(
+                this.bossDeathOrigin.x + event.x,
+                this.bossDeathOrigin.y + event.y,
+                event.size,
+                new Color(255, event.size >= 120 ? 215 : 165, 105, 255),
+            );
+            if (event.size >= 90) {
+                this.shakeScreen(event.size >= 140 ? 0.55 : 0.28, event.size >= 140 ? 16 : 9);
+            }
+            if (event.time >= 1.78) {
+                this.bombFlashTimer = Math.max(this.bombFlashTimer, 0.18);
+                if (this.bombFlashNode) this.bombFlashNode.active = true;
+            }
+            this.bossDeathStep += 1;
+        }
+
+        if (!this.bossDeathHidden && t >= 2.05) {
+            this.bossDeathHidden = true;
+            this.boss.node.active = false;
+        }
+        if (t >= 2.25) {
+            this.finishLevel();
+        }
     }
 
     // ---------- UI ----------
@@ -970,7 +1075,7 @@ export class GameManager extends Component {
     }
 
     private endGame() {
-        if (this.gameState === 'GAME_OVER' || this.gameState === 'CLEAR') {
+        if (this.gameState === 'BOSS_DYING' || this.gameState === 'GAME_OVER' || this.gameState === 'CLEAR') {
             return;
         }
         this.gameState = 'GAME_OVER';

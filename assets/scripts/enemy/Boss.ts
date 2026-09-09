@@ -75,7 +75,9 @@ export class Boss extends Component {
         if (this.hp > 0) return false;
         this.hp = 0;
         this.dead = true;
-        this.node.destroy();
+
+        // 不在这里销毁节点。GameManager 需要保留同一个 GOLIATH Sprite
+        // 完成连环爆炸 / 抖动 / 闪白，再进入 CLEAR。
         return true;
     }
 }
