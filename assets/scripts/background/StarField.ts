@@ -23,15 +23,66 @@ export class StarField extends Component {
     private ground: Node[] = [];
     private clouds: Node[] = [];
 
+    private speedScale = 1;
+    private speedFrom = 1;
+    private speedTarget = 1;
+    private speedTransitionElapsed = 0;
+    private speedTransitionDuration = 0;
+
     start() {
         this.buildAirbase();
         this.clouds = this.node.children.filter((n) => n.name.startsWith('Cloud'));
     }
 
+    /**
+     * 关卡演出只需要控制一个速度倍率，不直接操纵每个背景节点。
+     * transitionSeconds > 0 时使用 smoothstep 平滑过渡，适合滑跑、离地和 Boss 前减速。
+     */
+    public setScrollSpeedScale(scale: number, transitionSeconds = 0) {
+        const next = Math.max(0, Math.min(3, scale));
+        if (transitionSeconds <= 0) {
+            this.speedScale = next;
+            this.speedFrom = next;
+            this.speedTarget = next;
+            this.speedTransitionElapsed = 0;
+            this.speedTransitionDuration = 0;
+            return;
+        }
+        this.speedFrom = this.speedScale;
+        this.speedTarget = next;
+        this.speedTransitionElapsed = 0;
+        this.speedTransitionDuration = Math.max(0.05, transitionSeconds);
+    }
+
+    public getScrollSpeedScale(): number {
+        return this.speedScale;
+    }
+
     update(dt: number) {
         dt = Math.min(dt, 1 / 20);
-        this.scroll(this.ground, PANEL_HEIGHT, GROUND_SCROLL_SPEED * dt);
-        this.scroll(this.clouds, 1080, CLOUD_SCROLL_SPEED * dt);
+        this.updateSpeedTransition(dt);
+
+        // 云层保留最低漂移速度，避免起飞前背景完全静止；地面倍率则直接体现加速感。
+        const cloudScale = 0.65 + this.speedScale * 0.35;
+        this.scroll(this.ground, PANEL_HEIGHT, GROUND_SCROLL_SPEED * this.speedScale * dt);
+        this.scroll(this.clouds, 1080, CLOUD_SCROLL_SPEED * cloudScale * dt);
+    }
+
+    private updateSpeedTransition(dt: number) {
+        if (this.speedTransitionDuration <= 0) {
+            return;
+        }
+        this.speedTransitionElapsed = Math.min(
+            this.speedTransitionDuration,
+            this.speedTransitionElapsed + dt,
+        );
+        const t = this.speedTransitionElapsed / this.speedTransitionDuration;
+        const eased = t * t * (3 - 2 * t);
+        this.speedScale = this.speedFrom + (this.speedTarget - this.speedFrom) * eased;
+        if (this.speedTransitionElapsed >= this.speedTransitionDuration) {
+            this.speedScale = this.speedTarget;
+            this.speedTransitionDuration = 0;
+        }
     }
 
     private buildAirbase() {
