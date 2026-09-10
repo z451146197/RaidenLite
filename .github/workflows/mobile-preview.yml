@@ -74,7 +74,37 @@ jobs:
           path: ${{ runner.temp }}/cocos-cli
           key: cocos-cli-${{ runner.os }}-0.0.1-alpha.35-v1
 
+      # Cocos Creator keeps compiled engine bundles in its global temp directory.
+      # GitHub-hosted runners are ephemeral, so persist that directory separately and
+      # mount it back where Creator expects it. The key changes when engine-affecting
+      # project/build settings change, while restore-keys still lets Cocos reuse older
+      # compatible engine hashes already present in the cache directory.
+      - name: Restore Cocos engine build cache
+        id: cocos-engine-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/cocos-engine-cache
+          key: cocos-engine-${{ runner.os }}-creator-3.8.8-cli-alpha.35-${{ hashFiles('settings/**/*.json', 'tools/build-preview.json', 'package.json') }}
+          restore-keys: |
+            cocos-engine-${{ runner.os }}-creator-3.8.8-cli-alpha.35-
+
+      - name: Mount Cocos engine build cache
+        shell: bash
+        run: |
+          set -euxo pipefail
+          CACHE_DIR="$RUNNER_TEMP/cocos-engine-cache"
+          GLOBAL_BUILDER_DIR="${TMPDIR%/}/CocosCreator/3.8.8/builder"
+
+          mkdir -p "$CACHE_DIR" "$GLOBAL_BUILDER_DIR"
+          rm -rf "$GLOBAL_BUILDER_DIR/engine"
+          ln -s "$CACHE_DIR" "$GLOBAL_BUILDER_DIR/engine"
+
+          echo "COCOS_ENGINE_CACHE_DIR=$CACHE_DIR" >> "$GITHUB_ENV"
+          echo "Mounted Creator engine cache: $GLOBAL_BUILDER_DIR/engine -> $CACHE_DIR"
+          du -sh "$CACHE_DIR" || true
+
       - name: Build Web Mobile
+        id: build
         shell: bash
         run: |
           set -euxo pipefail
@@ -92,6 +122,13 @@ jobs:
           fi
 
           touch build/web-mobile/.nojekyll
+
+      - name: Save Cocos engine build cache
+        if: always() && steps.cocos-engine-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/cocos-engine-cache
+          key: cocos-engine-${{ runner.os }}-creator-3.8.8-cli-alpha.35-${{ hashFiles('settings/**/*.json', 'tools/build-preview.json', 'package.json') }}
 
       - name: Keep downloadable build artifact
         uses: actions/upload-artifact@v4
