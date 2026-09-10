@@ -17,6 +17,14 @@
 
 **仓库事实优先级：最新 main / PR / Issue > handoff 中的历史 SHA > 旧聊天记忆。**
 
+### 当前任务 Issue
+
+- **1 线：Issue #5** — Mission 01 Gameplay Runtime Integration v2
+- **2 线：Issue #6** — Mission 01 Environment / Scene / Assets v2
+- **3 线：Issue #7** — Director / Wingman Combat Core / GOLIATH / CI gate
+
+Issue 关闭时，先读其最终交接中的 `NEXT` 并寻找后继 Issue；不要重新依赖旧聊天。
+
 ---
 
 ## 1. 当前共享基线（接力快照）
@@ -28,6 +36,7 @@
 - Mission 01 设计简报与并行纪律已在 `docs/`。
 - Mission 01 Director Core 已通过 PR 合入主线；关键 merge commit：`1dcd636fc10c30197b9956ea6b19fa5da4df5635`。
 - 主线 Web Mobile Preview #16 在该快照附近成功完成并部署。
+- 三线持久化接力文档通过 PR #4 合入；接力文档 merge commit：`b391de419887bd8f51ff229f8b6c1220ffcfae74`。
 
 **注意：上面的 SHA 只是接力锚点，不是要求新对话停留在该提交。开工时必须重新读取最新 `main`。**
 
