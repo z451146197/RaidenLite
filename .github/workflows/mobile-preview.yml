@@ -30,8 +30,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22.17.0
-          cache: npm
-          cache-dependency-path: package.json
 
       - name: Validate project sources
         shell: bash
@@ -46,7 +44,7 @@ jobs:
           path: ${{ runner.temp }}/cocos-cli
           key: cocos-cli-${{ runner.os }}-0.0.1-alpha.35-v1
 
-      - name: Install Cocos CLI
+      - name: Prepare Cocos CLI
         shell: bash
         run: |
           set -euxo pipefail
@@ -62,15 +60,12 @@ jobs:
             npm run download-tools
             npm run build
           else
-            cd "$CLI_DIR"
             echo "Using cached Cocos CLI build."
           fi
 
-          # The alpha CLI can lose its executable bit after the TypeScript build.
-          chmod +x dist/cli.js
-          npm link
-          chmod +x "$(npm prefix -g)/bin/cocos" || true
-          cocos --version || cocos --help
+          chmod +x "$CLI_DIR/dist/cli.js"
+          echo "COCOS_CLI_JS=$CLI_DIR/dist/cli.js" >> "$GITHUB_ENV"
+          node "$CLI_DIR/dist/cli.js" --version || node "$CLI_DIR/dist/cli.js" --help
 
       - name: Save Cocos CLI cache
         if: steps.cocos-cli-cache.outputs.cache-hit != 'true'
@@ -84,10 +79,10 @@ jobs:
         run: |
           set -euxo pipefail
           rm -rf build/web-mobile
-          if ! cocos --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile --config "$GITHUB_WORKSPACE/tools/build-preview.json"; then
+          if ! node "$COCOS_CLI_JS" --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile --config "$GITHUB_WORKSPACE/tools/build-preview.json"; then
             echo "Config-file build failed; retrying with project/platform defaults."
             rm -rf build/web-mobile
-            cocos --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile
+            node "$COCOS_CLI_JS" --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile
           fi
 
           if [ ! -f build/web-mobile/index.html ]; then
@@ -104,6 +99,7 @@ jobs:
           name: RaidenLite-web-mobile
           path: build/web-mobile
           if-no-files-found: error
+          compression-level: 0
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
