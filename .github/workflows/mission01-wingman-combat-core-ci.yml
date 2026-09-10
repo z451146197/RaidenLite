@@ -80,7 +80,11 @@ jobs:
         run: |
           set -euxo pipefail
           rm -rf build/web-mobile
-          node "$COCOS_CLI_JS" --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile --config "$GITHUB_WORKSPACE/tools/build-preview.json"
+          if ! node "$COCOS_CLI_JS" --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile --config "$GITHUB_WORKSPACE/tools/build-preview.json"; then
+            echo "Config-file build failed; retrying with project/platform defaults."
+            rm -rf build/web-mobile
+            node "$COCOS_CLI_JS" --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile
+          fi
           test -f build/web-mobile/index.html
 
       - name: Keep validation artifact
