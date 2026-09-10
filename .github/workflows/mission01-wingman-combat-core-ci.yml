@@ -1,0 +1,92 @@
+name: Validate Mission 01 Wingman Combat Core
+
+on:
+  push:
+    branches: [test/mission01-wingman-combat-core-ci]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout game project
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+
+      - name: Validate project sources
+        shell: bash
+        run: |
+          node tools/check-project.cjs
+          node tools/check-mission01.cjs
+          node tools/check-mission01-director-core.cjs
+          node tools/check-mission01-wingman-combat-core.cjs
+
+      - name: Restore Cocos CLI cache
+        id: cocos-cli-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/cocos-cli
+          key: cocos-cli-${{ runner.os }}-0.0.1-alpha.35-v1
+
+      - name: Prepare Cocos CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          CLI_DIR="$RUNNER_TEMP/cocos-cli"
+          if [ "${{ steps.cocos-cli-cache.outputs.cache-hit }}" != "true" ] || [ ! -f "$CLI_DIR/dist/cli.js" ]; then
+            rm -rf "$CLI_DIR"
+            git clone --depth 1 --branch 0.0.1-alpha.35 https://github.com/cocos/cocos-cli.git "$CLI_DIR"
+            cd "$CLI_DIR"
+            npm install -g node-gyp
+            npm run init
+            npm install
+            npm run download-tools
+            npm run build
+          fi
+          chmod +x "$CLI_DIR/dist/cli.js"
+          echo "COCOS_CLI_JS=$CLI_DIR/dist/cli.js" >> "$GITHUB_ENV"
+          node "$CLI_DIR/dist/cli.js" --version || node "$CLI_DIR/dist/cli.js" --help
+
+      - name: Restore Cocos engine build cache
+        id: cocos-engine-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/cocos-engine-cache
+          key: cocos-engine-${{ runner.os }}-creator-3.8.8-cli-alpha.35-${{ hashFiles('settings/**/*.json', 'tools/build-preview.json', 'package.json') }}
+          restore-keys: |
+            cocos-engine-${{ runner.os }}-creator-3.8.8-cli-alpha.35-
+
+      - name: Mount Cocos engine build cache
+        shell: bash
+        run: |
+          set -euxo pipefail
+          CACHE_DIR="$RUNNER_TEMP/cocos-engine-cache"
+          GLOBAL_BUILDER_DIR="${TMPDIR%/}/CocosCreator/3.8.8/builder"
+          mkdir -p "$CACHE_DIR" "$GLOBAL_BUILDER_DIR"
+          rm -rf "$GLOBAL_BUILDER_DIR/engine"
+          ln -s "$CACHE_DIR" "$GLOBAL_BUILDER_DIR/engine"
+          echo "COCOS_ENGINE_CACHE_DIR=$CACHE_DIR" >> "$GITHUB_ENV"
+
+      - name: Build Web Mobile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf build/web-mobile
+          node "$COCOS_CLI_JS" --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile --config "$GITHUB_WORKSPACE/tools/build-preview.json"
+          test -f build/web-mobile/index.html
+
+      - name: Keep validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mission01-wingman-combat-core-web-mobile
+          path: build/web-mobile
+          if-no-files-found: error
+          compression-level: 0
