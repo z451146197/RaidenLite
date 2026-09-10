@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 const timeline = read('assets/scripts/game/Mission01Timeline.ts');
+const sequences = read('assets/scripts/game/Mission01Sequences.ts');
 const director = read('assets/scripts/game/Mission01Director.ts');
 const driver = read('assets/scripts/Mission01DirectorDriver.ts');
 const gameManager = read('assets/scripts/game/GameManager.ts');
@@ -40,15 +41,17 @@ for (const cue of requiredStoryCues) {
     assert.equal(uses.length, 1, `Expected exactly one timeline event for ${cue}, got ${uses.length}`);
 }
 
-assert.ok(timeline.includes('MISSION01_SEQUENCES'), 'Missing canonical Mission 01 sequence windows');
-assert.ok(timeline.includes("mission01CueTime('GOLIATH_ENTER')"), 'Boss time must derive from the GOLIATH_ENTER cue');
+// Timeline 只拥有离散秒点；连续窗口必须在低冲突派生文件里定义。
+assert.ok(!timeline.includes('MISSION01_SEQUENCES'), 'Sequence helpers must not live in high-conflict Mission01Timeline.ts');
+assert.ok(sequences.includes('MISSION01_SEQUENCES'), 'Missing canonical Mission 01 sequence windows');
+assert.ok(sequences.includes("mission01CueTime('GOLIATH_ENTER')"), 'GOLIATH sequence must derive from story cues');
 
 // Director 是唯一剧情时钟和离散事件游标。
 assert.ok(director.includes('private elapsed = 0'), 'Mission01Director must own the mission clock');
 assert.ok(director.includes('private nextEventIndex = 0'), 'Mission01Director must own the event cursor');
 assert.ok(director.includes('flushEvents()'), 'Mission01Director must dispatch timeline events');
 assert.ok(driver.includes('MISSION01_DIRECTOR.advance(deltaTime)'), 'Mission clock has no Cocos driver');
-assert.ok(gameManager.includes('MISSION01_DIRECTOR.onEvent'), 'GameManager must consume Director events');
+assert.ok(gameManager.includes('MISSION01_DIRECTOR.onEvent'), 'GameManager integration candidate must consume Director events');
 for (const forbidden of ['private levelTime', 'private nextLevelEvent', 'runLevelTimeline()']) {
     assert.ok(!gameManager.includes(forbidden), `GameManager still owns timeline state: ${forbidden}`);
 }
@@ -60,7 +63,6 @@ for (const [name, source] of [
     assert.ok(!source.includes('private elapsed'), `${name} must not own a narrative clock`);
 }
 
-// 连续演出必须从 Director sequence progress 读取，而不是复制秒点。
 assert.ok(playerFlight.includes("MISSION01_DIRECTOR.progress('TAKEOFF')"), 'AURORA takeoff is not Director-driven');
 assert.ok(wingmen.includes("MISSION01_DIRECTOR.progress('FALCON_INTERCEPT')"), 'FALCON intercept is not Director-driven');
 assert.ok(wingmen.includes("MISSION01_DIRECTOR.progress('VIPER_WITHDRAW')"), 'VIPER withdrawal is not Director-driven');
@@ -80,4 +82,4 @@ assert.ok(goliath.includes('handoffVisualTo'), 'Missing GOLIATH visual handoff A
 assert.ok(background.includes('handoffGoliathVisualTo'), 'StarField must expose GOLIATH handoff to Boss');
 assert.ok(boss.includes('handoffGoliathVisualTo(this.node)'), 'Boss no longer adopts grounded GOLIATH visual');
 
-console.log(`PASS: Mission 01 has ${eventTimes.length} ordered events, one Director clock/event cursor, six background stages, dedicated wingmen, and isolated GOLIATH sequence.`);
+console.log(`PASS: Mission 01 has ${eventTimes.length} ordered events, one Director clock/event cursor, derived sequence windows, dedicated wingmen, six stages, and isolated GOLIATH sequence.`);

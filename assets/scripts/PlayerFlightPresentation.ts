@@ -1,6 +1,6 @@
 import { _decorator, Color, Component, Graphics, Node, UIOpacity, UITransform } from 'cc';
 import { MISSION01_DIRECTOR } from './game/Mission01Director';
-import { MISSION01_SEQUENCES } from './game/Mission01Timeline';
+import { MISSION01_SEQUENCES } from './game/Mission01Sequences';
 
 const { ccclass } = _decorator;
 

@@ -2,7 +2,7 @@ import { _decorator, Color, Component, Graphics, Node, UIOpacity, UITransform } 
 import { Explosion } from './effect/Explosion';
 import { MISSION01_DIRECTOR } from './game/Mission01Director';
 import { applyArtSprite } from './game/ArtUtil';
-import { MISSION01_SEQUENCES } from './game/Mission01Timeline';
+import { MISSION01_SEQUENCES } from './game/Mission01Sequences';
 
 const { ccclass } = _decorator;
 
@@ -176,7 +176,6 @@ export class Mission01Wingmen extends Component {
                 this.spawnExplosion(this.falcon.node.position.x + 24, this.falcon.node.position.y + 18, 34);
             }
 
-            const damagedFor = MISSION01_DIRECTOR.since('FALCON_DAMAGED');
             const fall = smoothstep(MISSION01_DIRECTOR.progress('FALCON_LOSS'));
             desiredX = playerX + 185 + fall * 165;
             desiredY = playerY - 50 - fall * 380;
