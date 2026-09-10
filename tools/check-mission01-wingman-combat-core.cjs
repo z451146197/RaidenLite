@@ -7,6 +7,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 const scheduler = read('assets/scripts/game/Mission01WingmanCombat.ts');
 const port = read('assets/scripts/game/Mission01WingmanCombatPort.ts');
+const targeting = read('assets/scripts/game/Mission01WingmanTargeting.ts');
 
 assert.ok(scheduler.includes("falconState"), 'Wingman combat must consume FALCON Actor State');
 assert.ok(scheduler.includes("viperState"), 'Wingman combat must consume VIPER Actor State');
@@ -30,9 +31,13 @@ for (const damage of damages) {
 
 assert.ok(port.includes('getWingmanPose('), 'Combat Port must read wingman presentation pose');
 assert.ok(port.includes('fireWingman('), 'Combat Port must delegate real projectile creation to Gameplay');
+assert.ok(targeting.includes('selectMission01WingmanTarget'), 'Target selection must live in Combat Core');
+assert.ok(targeting.includes("aimMode === 'PRIORITY_THREAT'"), 'FALCON intercept must support threat-priority targeting');
+assert.ok(targeting.includes('candidate.heavyThreat'), 'Threat targeting must distinguish HEAVY threats');
+assert.ok(targeting.includes('mission01WingmanAimAngle'), 'Combat Core must provide shared aiming math');
 for (const forbidden of ['../enemy/Enemy', '../bullet/Bullet', './GameManager']) {
-    assert.ok(!scheduler.includes(forbidden) && !port.includes(forbidden),
+    assert.ok(!scheduler.includes(forbidden) && !port.includes(forbidden) && !targeting.includes(forbidden),
         `Wingman Combat Core must not bypass Gameplay ownership via ${forbidden}`);
 }
 
-console.log('PASS: Wingman Combat uses Director actor states, deterministic fire slots, support DPS, and a thin Gameplay-owned projectile port.');
+console.log('PASS: Wingman Combat uses Director actor states, deterministic fire slots, support DPS, pure targeting, and a thin Gameplay-owned projectile port.');
