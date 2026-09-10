@@ -1,6 +1,5 @@
-import { _decorator, Color, Component, Graphics, Node, Sprite, UIOpacity, UITransform } from 'cc';
-import { applyArtSprite } from '../game/ArtUtil';
-import { MISSION01_BOSS_TIME, MISSION01_TIMELINE } from '../game/Mission01Timeline';
+import { _decorator, Color, Component, Graphics, Node, Sprite, UITransform } from 'cc';
+import { Mission01GoliathSequence } from '../Mission01GoliathSequence';
 
 const { ccclass } = _decorator;
 
@@ -9,24 +8,13 @@ const PANEL_HEIGHT = 1334;
 const GROUND_SCROLL_SPEED = 34;
 const CLOUD_SCROLL_SPEED = 57;
 const PROCEDURAL_PANEL_COUNT = 6;
-const GOLIATH_BASE_Y = 110;
-const GOLIATH_PREPARE_TIME = MISSION01_TIMELINE.find(
-    (event) => event.kind === 'STORY' && event.cue === 'BOSS_PREPARE',
-)?.time ?? 133;
 
 /**
- * Mission 01 连续程序化背景。
+ * Mission 01 连续背景控制器。
  *
- * 六段固定空间顺序：
- * 0 起飞坪 / 机库
- * 1 主跑道 / 维修区
- * 2 基地边界 / 海岸
- * 3 港区防御带
- * 4 撤离后勤区 / 受损基地
- * 5 GOLIATH 平台
- *
- * 1/2 线的正式背景素材落库后，只需要替换各 Ground 面板的视觉内容，
- * 时间轴、滚动、GOLIATH 挂点与 Boss 转场不用重写。
+ * 职责只保留三件事：六段空间结构、背景滚动、滚动速度过渡。
+ * GOLIATH 的剧情时钟和升空动画已经移到 Mission01GoliathSequence；正式环境素材落库后，
+ * 只替换 GroundA-F 的视觉实现，不需要碰关卡事件或 Boss Sequence。
  */
 @ccclass('StarField')
 export class StarField extends Component {
@@ -38,13 +26,7 @@ export class StarField extends Component {
     private speedTarget = 1;
     private speedTransitionElapsed = 0;
     private speedTransitionDuration = 0;
-    private elapsed = 0;
-
-    private goliathGroundNode: Node | null = null;
-    private goliathArtNode: Node | null = null;
-    private goliathShadowNode: Node | null = null;
-    private goliathShadowOpacity: UIOpacity | null = null;
-    private goliathThrusterOpacity: UIOpacity | null = null;
+    private goliathSequence: Mission01GoliathSequence | null = null;
 
     start() {
         this.buildAirbase();
@@ -77,43 +59,20 @@ export class StarField extends Component {
     }
 
     public getGoliathGroundNode(): Node | null {
-        return this.goliathGroundNode;
+        return this.goliathSequence?.node ?? null;
     }
 
-    /**
-     * Boss 生成时把同一个 __BossArt Sprite 节点从 GroundF 迁移到 Boss 节点。
-     * 逻辑碰撞宿主可以切换，但玩家看到的机体 Sprite 没有换图/换节点。
-     */
+    /** Boss 逻辑宿主变化，但玩家看到的是 GroundF 上同一个 __BossArt Sprite。 */
     public handoffGoliathVisualTo(target: Node): boolean {
-        const source = this.goliathGroundNode;
-        const art = this.goliathArtNode ?? source?.getChildByName('__BossArt') ?? null;
-        if (!source || !art) return false;
-
-        const world = source.worldPosition.clone();
-        target.setWorldPosition(world);
-
-        art.removeFromParent();
-        target.addChild(art);
-        art.setPosition(0, 0, 0);
-        art.angle = 180;
-
-        this.goliathShadowNode?.destroy();
-        source.destroy();
-        this.goliathGroundNode = null;
-        this.goliathArtNode = null;
-        this.goliathShadowNode = null;
-        this.goliathShadowOpacity = null;
-        this.goliathThrusterOpacity = null;
-        return true;
+        const handedOff = this.goliathSequence?.handoffVisualTo(target) ?? false;
+        if (handedOff) this.goliathSequence = null;
+        return handedOff;
     }
 
     update(dt: number) {
         dt = Math.min(dt, 1 / 20);
-        this.elapsed += dt;
         this.updateSpeedTransition(dt);
-        this.updateGoliathPresentation();
 
-        // 云层保留最低漂移速度；地面倍率直接体现滑跑、巡航与 Boss 前减速。
         const cloudScale = 0.65 + this.speedScale * 0.35;
         this.scroll(this.ground, PANEL_HEIGHT, GROUND_SCROLL_SPEED * this.speedScale * dt);
         this.scroll(this.clouds, 1080, CLOUD_SCROLL_SPEED * cloudScale * dt);
@@ -131,31 +90,6 @@ export class StarField extends Component {
         if (this.speedTransitionElapsed >= this.speedTransitionDuration) {
             this.speedScale = this.speedTarget;
             this.speedTransitionDuration = 0;
-        }
-    }
-
-    private updateGoliathPresentation() {
-        if (!this.goliathGroundNode || this.elapsed < GOLIATH_PREPARE_TIME) return;
-
-        const duration = Math.max(0.1, MISSION01_BOSS_TIME - GOLIATH_PREPARE_TIME);
-        const raw = Math.max(0, Math.min(1, (this.elapsed - GOLIATH_PREPARE_TIME) / duration));
-        const t = raw * raw * (3 - 2 * raw);
-        const rumble = Math.min(1, (this.elapsed - GOLIATH_PREPARE_TIME) / 1.6);
-        const jitterX = Math.sin(this.elapsed * 42) * 2.2 * rumble * (1 - t * 0.55);
-        const lift = 118 * t;
-
-        this.goliathGroundNode.setPosition(jitterX, GOLIATH_BASE_Y + lift, 0);
-        this.goliathArtNode?.setScale(0.90 + t * 0.12, 0.90 + t * 0.12, 1);
-
-        if (this.goliathShadowNode) {
-            this.goliathShadowNode.setScale(1 - t * 0.58, 1 - t * 0.58, 1);
-        }
-        if (this.goliathShadowOpacity) {
-            this.goliathShadowOpacity.opacity = Math.round(118 * (1 - t * 0.82));
-        }
-        if (this.goliathThrusterOpacity) {
-            const pulse = 0.82 + Math.sin(this.elapsed * 23) * 0.18;
-            this.goliathThrusterOpacity.opacity = Math.round((55 + t * 190) * pulse);
         }
     }
 
@@ -300,7 +234,6 @@ export class StarField extends Component {
         this.fillRect(g, -375, -667, 750, 1334, this.color(18, 49, 60));
         this.drawWaterTexture(g, -650, 650);
 
-        // 左右防波堤，中间留下宽阔纵向战斗水道。
         this.fillRect(g, -360, -667, 145, 1334, this.color(48, 63, 65));
         this.fillRect(g, 215, -667, 145, 1334, this.color(48, 63, 65));
         this.drawConcreteGrid(g, -360, -667, 145, 1334, 112, 96);
@@ -311,7 +244,6 @@ export class StarField extends Component {
             this.drawDefensePad(g, 286, y + 45);
         }
 
-        // 两组短码头伸向中央，但不封死弹幕视线。
         this.fillRect(g, -215, -330, 92, 64, this.color(57, 72, 73));
         this.fillRect(g, 123, 80, 92, 64, this.color(57, 72, 73));
         this.drawBeacon(g, -205, 585);
@@ -324,7 +256,6 @@ export class StarField extends Component {
         this.fillRect(g, -375, -667, 750, 1334, this.color(19, 49, 58));
         this.drawWaterTexture(g, -650, 650);
 
-        // 中央后勤岛与沿海车道；中间仍然保持低细节战斗通道。
         this.fillRect(g, -310, -667, 620, 1334, this.color(49, 61, 62));
         this.drawConcreteGrid(g, -310, -667, 620, 1334, 124, 108);
         this.fillRect(g, -128, -667, 256, 1334, this.color(38, 48, 50));
@@ -338,7 +269,6 @@ export class StarField extends Component {
         this.drawHangar(g, -286, 315, 120, 180);
         this.drawServiceBay(g, 170, 330, 116, 205, false);
 
-        // 静态烧蚀/爆坑只放在边缘；动态火烟仍由 FX 系统负责。
         this.drawBlastScar(g, -226, 125, 42);
         this.drawBlastScar(g, 232, 215, 34);
         this.drawBlastScar(g, -252, 555, 28);
@@ -350,7 +280,6 @@ export class StarField extends Component {
         this.fillRect(g, -375, -667, 750, 1334, this.color(17, 45, 55));
         this.drawWaterTexture(g, -650, 650);
 
-        // 巨型升降平台，GOLIATH 本体是独立 Sprite，不烘焙进 Graphics。
         this.fillRect(g, -325, -667, 650, 1334, this.color(44, 55, 57));
         this.drawConcreteGrid(g, -325, -667, 650, 1334, 130, 116);
         this.fillRect(g, -185, -190, 370, 600, this.color(32, 42, 45));
@@ -359,7 +288,6 @@ export class StarField extends Component {
         this.drawChevron(g, 0, -120, 68, this.color(181, 156, 76, 130));
         this.drawChevron(g, 0, 355, 52, this.color(181, 156, 76, 95));
 
-        // 两侧已经遭到攻击的维护区，中央 Boss 舞台保持干净。
         this.drawServiceBay(g, -300, -515, 96, 205, true);
         this.drawServiceBay(g, 204, -505, 96, 205, false);
         this.drawHangar(g, -300, 360, 100, 175);
@@ -372,42 +300,12 @@ export class StarField extends Component {
         panel.getChildByName('__GoliathGround')?.destroy();
         panel.getChildByName('__GoliathShadow')?.destroy();
 
-        const shadow = new Node('__GoliathShadow');
-        shadow.layer = panel.layer;
-        panel.addChild(shadow);
-        shadow.setPosition(0, GOLIATH_BASE_Y - 34, 0);
-        shadow.addComponent(UITransform).setContentSize(250, 150);
-        const sg = shadow.addComponent(Graphics);
-        sg.fillColor = this.color(3, 8, 11, 118);
-        sg.ellipse(0, 0, 108, 58);
-        sg.fill();
-        this.goliathShadowOpacity = shadow.addComponent(UIOpacity);
-        this.goliathShadowNode = shadow;
-
         const host = new Node('__GoliathGround');
         host.layer = panel.layer;
         panel.addChild(host);
-        host.setPosition(0, GOLIATH_BASE_Y, 0);
-        host.addComponent(UITransform).setContentSize(285, 250);
-        this.goliathGroundNode = host;
-
-        const art = applyArtSprite(host, 'art/boss', 285, 250, '__BossArt', 255);
-        art.angle = 180;
-        art.setScale(0.90, 0.90, 1);
-        this.goliathArtNode = art;
-
-        const thruster = new Node('__GoliathThruster');
-        thruster.layer = panel.layer;
-        host.addChild(thruster);
-        thruster.setPosition(0, 103, 0);
-        thruster.addComponent(UITransform).setContentSize(130, 58);
-        const tg = thruster.addComponent(Graphics);
-        tg.fillColor = this.color(255, 147, 74, 230);
-        tg.circle(-42, 0, 13);
-        tg.circle(42, 0, 13);
-        tg.fill();
-        this.goliathThrusterOpacity = thruster.addComponent(UIOpacity);
-        this.goliathThrusterOpacity.opacity = 0;
+        const sequence = host.addComponent(Mission01GoliathSequence);
+        sequence.initialize();
+        this.goliathSequence = sequence;
     }
 
     // ---------- 可复用背景模块 ----------
