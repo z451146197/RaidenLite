@@ -16,7 +16,8 @@ assert.ok(scheduler.includes('currentKey('), 'Scheduler must support silent slot
 assert.ok(scheduler.includes('if (now < this.lastTime)'), 'Scheduler must handle backward seek/restart');
 assert.ok(scheduler.includes('if (viper) orders.push(viper)'), 'VIPER fire order is not emitted');
 assert.ok(scheduler.includes('if (falcon) orders.push(falcon)'), 'FALCON fire order is not emitted');
-assert.ok(!scheduler.includes('deltaTime'), 'Wingman combat must not maintain a second deltaTime fire clock');
+assert.ok(!scheduler.includes('update(deltaTime'), 'Wingman combat must not own a frame-time update loop');
+assert.ok(!scheduler.includes('+= deltaTime'), 'Wingman combat must not accumulate a second deltaTime clock');
 assert.ok(!scheduler.includes('elapsed +='), 'Wingman combat must not accumulate a narrative clock');
 assert.ok(!scheduler.includes("phase: 'DAMAGED'"), 'DAMAGED FALCON must not have a fire profile');
 assert.ok(!scheduler.includes("phase: 'WITHDRAWING'"), 'WITHDRAWING VIPER must not have a fire profile');
