@@ -1,4 +1,5 @@
 import { _decorator, Color, Component, Graphics, Node, UIOpacity, UITransform } from 'cc';
+import { goliathState } from './game/Mission01ActorState';
 import { applyArtSprite } from './game/ArtUtil';
 import { MISSION01_DIRECTOR } from './game/Mission01Director';
 
@@ -9,8 +10,8 @@ const GOLIATH_BASE_Y = 110;
 /**
  * GOLIATH 从“地面设施”转为“战斗 Boss”的独立演出 Sequence。
  *
- * StarField 只提供 GroundF 宿主；本组件负责静态 Boss Sprite、地面阴影、启动尾焰、
- * 133-146 秒升空表现以及把同一个 __BossArt Sprite 交给 Boss 节点。
+ * 不读取 Timeline cue；只消费 GROUNDED/LIFTING/ENGAGED 演员状态。
+ * StarField 只负责 GroundF 宿主，Boss 逻辑只负责战斗，两边都不拥有这段演出时间。
  */
 @ccclass('Mission01GoliathSequence')
 export class Mission01GoliathSequence extends Component {
@@ -66,13 +67,13 @@ export class Mission01GoliathSequence extends Component {
     }
 
     update() {
-        if (!this.initialized || this.handedOff || !MISSION01_DIRECTOR.hasReached('BOSS_PREPARE')) return;
+        if (!this.initialized || this.handedOff) return;
+        const state = goliathState(MISSION01_DIRECTOR);
+        if (state.phase === 'GROUNDED') return;
 
-        const time = MISSION01_DIRECTOR.time;
-        const raw = MISSION01_DIRECTOR.progress('GOLIATH_PREPARE');
-        const t = raw * raw * (3 - 2 * raw);
-        const rumble = Math.min(1, MISSION01_DIRECTOR.since('BOSS_PREPARE') / 1.6);
-        const jitterX = Math.sin(time * 42) * 2.2 * rumble * (1 - t * 0.55);
+        const t = state.progress * state.progress * (3 - 2 * state.progress);
+        const rumble = Math.min(1, state.elapsed / 1.6);
+        const jitterX = Math.sin(MISSION01_DIRECTOR.time * 42) * 2.2 * rumble * (1 - t * 0.55);
         const lift = 118 * t;
 
         this.node.setPosition(jitterX, GOLIATH_BASE_Y + lift, 0);
@@ -85,7 +86,7 @@ export class Mission01GoliathSequence extends Component {
             this.shadowOpacity.opacity = Math.round(118 * (1 - t * 0.82));
         }
         if (this.thrusterOpacity) {
-            const pulse = 0.82 + Math.sin(time * 23) * 0.18;
+            const pulse = 0.82 + Math.sin(MISSION01_DIRECTOR.time * 23) * 0.18;
             this.thrusterOpacity.opacity = Math.round((55 + t * 190) * pulse);
         }
     }

@@ -1,6 +1,6 @@
 import { _decorator, Color, Component, Graphics, Node, UIOpacity, UITransform } from 'cc';
+import { auroraFlightState } from './game/Mission01ActorState';
 import { MISSION01_DIRECTOR } from './game/Mission01Director';
-import { MISSION01_SEQUENCES } from './game/Mission01Sequences';
 
 const { ccclass } = _decorator;
 
@@ -12,8 +12,8 @@ function smoothstep(value: number) {
 /**
  * AURORA 的纯表现层。
  *
- * 剧情时间只读取 Mission01Director；本组件不再维护 elapsed，也不复制任何秒点。
- * 地面 / 滑跑 / 离地 / 巡航全部由静态机体 + 阴影 + 尾焰 + 轻微缩放完成。
+ * 不理解 Timeline 秒点，只消费 Director 派生的 AuroraFlightState。
+ * 后续加入镜头、音效或地勤灯时，可与本组件共享 READY/ROLLING/LIFTING/AIRBORNE 语义。
  */
 @ccclass('PlayerFlightPresentation')
 export class PlayerFlightPresentation extends Component {
@@ -78,12 +78,8 @@ export class PlayerFlightPresentation extends Component {
     }
 
     private applyFlightState() {
-        const time = MISSION01_DIRECTOR.time;
-        const formation = smoothstep(MISSION01_DIRECTOR.progress('FORMATION'));
-        const lift = smoothstep(MISSION01_DIRECTOR.progress('TAKEOFF'));
-        const formationStart = MISSION01_SEQUENCES.FORMATION.start;
-        const takeoffStart = MISSION01_SEQUENCES.TAKEOFF.start;
-        const airborne = time >= MISSION01_SEQUENCES.TAKEOFF.end;
+        const state = auroraFlightState(MISSION01_DIRECTOR);
+        const progress = smoothstep(state.progress);
 
         let shadowScale = 1;
         let shadowAlpha = 118;
@@ -92,17 +88,17 @@ export class PlayerFlightPresentation extends Component {
         let artScale = 1;
         let thrusterStrength = 0.20;
 
-        if (time >= formationStart && time < takeoffStart) {
-            thrusterStrength = 0.35 + formation * 0.50;
-            shadowOffsetY -= formation * 5;
-        } else if (time >= takeoffStart && !airborne) {
-            thrusterStrength = 0.85 + lift * 0.15;
-            shadowScale = 1 - lift * 0.65;
-            shadowAlpha = 118 - lift * 104;
-            shadowOffsetX = 8 + lift * 18;
-            shadowOffsetY = -23 - lift * 34;
-            artScale = 1 + lift * 0.07;
-        } else if (airborne) {
+        if (state.phase === 'ROLLING') {
+            thrusterStrength = 0.35 + progress * 0.50;
+            shadowOffsetY -= progress * 5;
+        } else if (state.phase === 'LIFTING') {
+            thrusterStrength = 0.85 + progress * 0.15;
+            shadowScale = 1 - progress * 0.65;
+            shadowAlpha = 118 - progress * 104;
+            shadowOffsetX = 8 + progress * 18;
+            shadowOffsetY = -23 - progress * 34;
+            artScale = 1 + progress * 0.07;
+        } else if (state.phase === 'AIRBORNE') {
             shadowScale = 0.35;
             shadowAlpha = 14;
             shadowOffsetX = 26;
@@ -123,7 +119,7 @@ export class PlayerFlightPresentation extends Component {
         }
 
         if (this.thrusterNode && this.thrusterOpacity) {
-            const pulse = time >= formationStart ? 0.94 + Math.sin(time * 18) * 0.06 : 1;
+            const pulse = state.phase === 'READY' ? 1 : 0.94 + Math.sin(MISSION01_DIRECTOR.time * 18) * 0.06;
             this.thrusterNode.setScale(
                 0.78 + thrusterStrength * 0.22,
                 (0.46 + thrusterStrength * 0.70) * pulse,

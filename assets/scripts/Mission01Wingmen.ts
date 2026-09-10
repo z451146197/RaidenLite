@@ -1,8 +1,8 @@
 import { _decorator, Color, Component, Graphics, Node, UIOpacity, UITransform } from 'cc';
 import { Explosion } from './effect/Explosion';
+import { falconState, viperState } from './game/Mission01ActorState';
 import { MISSION01_DIRECTOR } from './game/Mission01Director';
 import { applyArtSprite } from './game/ArtUtil';
-import { MISSION01_SEQUENCES } from './game/Mission01Sequences';
 
 const { ccclass } = _decorator;
 
@@ -36,10 +36,10 @@ function smoothstep(value: number) {
 }
 
 /**
- * Mission 01 僚机纯表现层。
+ * Mission 01 僚机表现层。
  *
- * 所有剧情阈值和连续进度来自 Mission01Director，不再维护独立 elapsed。
- * 1/2 线的 VIPER / FALCON 静态 Sprite 只负责外观，编队、受损、烟迹和撤退仍由程序驱动。
+ * 只消费 Director 派生的演员状态，不理解“98 秒/108 秒/143 秒”这类剧情细节。
+ * 正式 VIPER/FALCON Sprite 负责外观；编队、受损、烟迹、坠毁和撤退仍由程序驱动。
  */
 @ccclass('Mission01Wingmen')
 export class Mission01Wingmen extends Component {
@@ -54,8 +54,7 @@ export class Mission01Wingmen extends Component {
     private viperWithdrawn = false;
 
     start() {
-        const parent = this.node.parent;
-        if (!parent) return;
+        if (!this.node.parent) return;
         this.viper = this.createWingman('VIPER', 'art/wingman_viper');
         this.falcon = this.createWingman('FALCON', 'art/wingman_falcon');
         this.snapInitialPositions();
@@ -109,27 +108,26 @@ export class Mission01Wingmen extends Component {
         const player = this.node.position;
         const airborne = smoothstep(MISSION01_DIRECTOR.progress('TAKEOFF'));
         const formation = smoothstep(MISSION01_DIRECTOR.progress('FORMATION'));
-
         this.updateViper(player.x, player.y, airborne, formation, dt);
         this.updateFalcon(player.x, player.y, airborne, formation, dt);
     }
 
     private updateViper(playerX: number, playerY: number, airborne: number, formation: number, dt: number) {
         if (!this.viper || this.viperWithdrawn) return;
+        const state = viperState(MISSION01_DIRECTOR);
 
         let desiredX = playerX - (126 - formation * 14);
         let desiredY = playerY - (88 - formation * 24);
         let targetRotation = 0;
         let followRate = 5.5;
 
-        if (MISSION01_DIRECTOR.hasReached('VIPER_DAMAGED')) {
+        if (state.phase === 'WITHDRAWING' || state.phase === 'WITHDRAWN') {
             if (!this.viperHitPlayed) {
                 this.viperHitPlayed = true;
                 this.spawnExplosion(this.viper.node.position.x - 24, this.viper.node.position.y + 16, 42);
             }
 
-            const damagedFor = MISSION01_DIRECTOR.since('VIPER_DAMAGED');
-            const withdraw = smoothstep(MISSION01_DIRECTOR.progress('VIPER_WITHDRAW'));
+            const withdraw = smoothstep(state.progress);
             desiredX = playerX - 118 - withdraw * 540;
             desiredY = playerY - 54 + withdraw * 175;
             targetRotation = 11 + withdraw * 24;
@@ -141,7 +139,7 @@ export class Mission01Wingmen extends Component {
                 this.spawnSmoke(this.viper.node.position.x - 18, this.viper.node.position.y - 52);
             }
 
-            if (damagedFor >= MISSION01_SEQUENCES.VIPER_WITHDRAW.end - MISSION01_SEQUENCES.VIPER_WITHDRAW.start) {
+            if (state.phase === 'WITHDRAWN') {
                 this.viperWithdrawn = true;
                 this.viper.node.active = false;
                 this.viper.shadow.active = false;
@@ -156,27 +154,26 @@ export class Mission01Wingmen extends Component {
 
     private updateFalcon(playerX: number, playerY: number, airborne: number, formation: number, dt: number) {
         if (!this.falcon || this.falconDeathStarted) return;
+        const state = falconState(MISSION01_DIRECTOR);
 
         let desiredX = playerX + (126 - formation * 14);
         let desiredY = playerY - (88 - formation * 24);
         let followRate = 5.5;
         let targetRotation = 0;
 
-        if (MISSION01_DIRECTOR.hasReached('FALCON_TARGETED') && !MISSION01_DIRECTOR.hasReached('FALCON_DAMAGED')) {
-            const attack = smoothstep(MISSION01_DIRECTOR.progress('FALCON_INTERCEPT'));
+        if (state.phase === 'INTERCEPT') {
+            const attack = smoothstep(state.progress);
             desiredX = playerX + 112 + attack * 92;
             desiredY = playerY - 64 + Math.sin(attack * Math.PI) * 150;
             targetRotation = -5 - attack * 7;
             followRate = 4.2;
-        }
-
-        if (MISSION01_DIRECTOR.hasReached('FALCON_DAMAGED')) {
+        } else if (state.phase === 'DAMAGED' || state.phase === 'DESTROYED') {
             if (!this.falconHitPlayed) {
                 this.falconHitPlayed = true;
                 this.spawnExplosion(this.falcon.node.position.x + 24, this.falcon.node.position.y + 18, 34);
             }
 
-            const fall = smoothstep(MISSION01_DIRECTOR.progress('FALCON_LOSS'));
+            const fall = smoothstep(state.progress);
             desiredX = playerX + 185 + fall * 165;
             desiredY = playerY - 50 - fall * 380;
             targetRotation = -12 - fall * 34;
@@ -193,7 +190,7 @@ export class Mission01Wingmen extends Component {
         this.falcon.rotation += (targetRotation - this.falcon.rotation) * Math.min(1, dt * 5.5);
         this.applyWingmanTransform(this.falcon, airborne);
 
-        if (MISSION01_DIRECTOR.hasReached('FALCON_DESTROYED')) {
+        if (state.phase === 'DESTROYED') {
             this.beginFalconDestruction();
         }
     }

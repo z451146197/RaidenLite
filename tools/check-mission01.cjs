@@ -8,6 +8,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const timeline = read('assets/scripts/game/Mission01Timeline.ts');
 const sequences = read('assets/scripts/game/Mission01Sequences.ts');
 const director = read('assets/scripts/game/Mission01Director.ts');
+const actorState = read('assets/scripts/game/Mission01ActorState.ts');
 const driver = read('assets/scripts/Mission01DirectorDriver.ts');
 const gameManager = read('assets/scripts/game/GameManager.ts');
 const playerFlight = read('assets/scripts/PlayerFlightPresentation.ts');
@@ -41,7 +42,7 @@ for (const cue of requiredStoryCues) {
     assert.equal(uses.length, 1, `Expected exactly one timeline event for ${cue}, got ${uses.length}`);
 }
 
-// Timeline 只拥有离散秒点；连续窗口必须在低冲突派生文件里定义。
+// Timeline 只拥有离散秒点；连续窗口在低冲突派生文件里定义。
 assert.ok(!timeline.includes('MISSION01_SEQUENCES'), 'Sequence helpers must not live in high-conflict Mission01Timeline.ts');
 assert.ok(sequences.includes('MISSION01_SEQUENCES'), 'Missing canonical Mission 01 sequence windows');
 assert.ok(sequences.includes("mission01CueTime('GOLIATH_ENTER')"), 'GOLIATH sequence must derive from story cues');
@@ -63,9 +64,14 @@ for (const [name, source] of [
     assert.ok(!source.includes('private elapsed'), `${name} must not own a narrative clock`);
 }
 
-assert.ok(playerFlight.includes("MISSION01_DIRECTOR.progress('TAKEOFF')"), 'AURORA takeoff is not Director-driven');
-assert.ok(wingmen.includes("MISSION01_DIRECTOR.progress('FALCON_INTERCEPT')"), 'FALCON intercept is not Director-driven');
-assert.ok(wingmen.includes("MISSION01_DIRECTOR.progress('VIPER_WITHDRAW')"), 'VIPER withdrawal is not Director-driven');
+// 演员状态是 Timeline 与表现/战斗之间的唯一状态语义层。
+for (const fn of ['auroraFlightState', 'falconState', 'viperState', 'goliathState']) {
+    assert.ok(actorState.includes(`function ${fn}`), `Missing actor-state derivation: ${fn}`);
+}
+assert.ok(playerFlight.includes('auroraFlightState(MISSION01_DIRECTOR)'), 'AURORA presentation bypasses actor state');
+assert.ok(wingmen.includes('falconState(MISSION01_DIRECTOR)'), 'FALCON presentation bypasses actor state');
+assert.ok(wingmen.includes('viperState(MISSION01_DIRECTOR)'), 'VIPER presentation bypasses actor state');
+assert.ok(goliath.includes('goliathState(MISSION01_DIRECTOR)'), 'GOLIATH presentation bypasses actor state');
 assert.ok(wingmen.includes("'art/wingman_viper'"), 'VIPER dedicated sprite is not wired');
 assert.ok(wingmen.includes("'art/wingman_falcon'"), 'FALCON dedicated sprite is not wired');
 
@@ -77,9 +83,8 @@ for (const fn of ['drawLaunchApron', 'drawMainRunway', 'drawCoastalExit', 'drawH
 assert.ok(background.includes('Mission01GoliathSequence'), 'StarField must delegate GOLIATH presentation to its sequence');
 assert.ok(!background.includes('updateGoliathPresentation'), 'GOLIATH presentation leaked back into StarField');
 assert.ok(goliath.includes("this.node.name = '__GoliathGround'"), 'Missing grounded GOLIATH host');
-assert.ok(goliath.includes("MISSION01_DIRECTOR.progress('GOLIATH_PREPARE')"), 'GOLIATH lift is not Director-driven');
 assert.ok(goliath.includes('handoffVisualTo'), 'Missing GOLIATH visual handoff API');
 assert.ok(background.includes('handoffGoliathVisualTo'), 'StarField must expose GOLIATH handoff to Boss');
 assert.ok(boss.includes('handoffGoliathVisualTo(this.node)'), 'Boss no longer adopts grounded GOLIATH visual');
 
-console.log(`PASS: Mission 01 has ${eventTimes.length} ordered events, one Director clock/event cursor, derived sequence windows, dedicated wingmen, six stages, and isolated GOLIATH sequence.`);
+console.log(`PASS: Mission 01 has ${eventTimes.length} ordered events, one Director clock/event cursor, derived sequence windows, shared actor states, dedicated wingmen, six stages, and isolated GOLIATH sequence.`);
