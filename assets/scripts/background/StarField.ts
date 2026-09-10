@@ -1,6 +1,11 @@
 import { _decorator, Color, Component, Graphics, Node, Sprite, UIOpacity, UITransform } from 'cc';
 import { applyArtSprite } from '../game/ArtUtil';
-import { MISSION01_BOSS_TIME, MISSION01_TIMELINE } from '../game/Mission01Timeline';
+import {
+    DEFAULT_MISSION01_ENVIRONMENT_STATE,
+    MISSION01_ENVIRONMENT_STAGES,
+    Mission01EnvironmentPresentationState,
+    normalizeMission01EnvironmentState,
+} from './Mission01EnvironmentState';
 
 const { ccclass } = _decorator;
 
@@ -10,23 +15,20 @@ const GROUND_SCROLL_SPEED = 34;
 const CLOUD_SCROLL_SPEED = 57;
 const PROCEDURAL_PANEL_COUNT = 6;
 const GOLIATH_BASE_Y = 110;
-const GOLIATH_PREPARE_TIME = MISSION01_TIMELINE.find(
-    (event) => event.kind === 'STORY' && event.cue === 'BOSS_PREPARE',
-)?.time ?? 133;
 
 /**
  * Mission 01 连续程序化背景。
  *
  * 六段固定空间顺序：
- * 0 起飞坪 / 机库
- * 1 主跑道 / 维修区
- * 2 基地边界 / 海岸
- * 3 港区防御带
- * 4 撤离后勤区 / 受损基地
- * 5 GOLIATH 平台
+ * BG01 起飞基地 / 跑道与机库
+ * BG02 海岸撤离走廊
+ * BG03 港区防御带
+ * BG04 撤离后勤区
+ * BG05 基地崩溃 / 被己方防御系统清除
+ * BG06 GOLIATH 战区 / 平台区
  *
- * 1/2 线的正式背景素材落库后，只需要替换各 Ground 面板的视觉内容，
- * 时间轴、滚动、GOLIATH 挂点与 Boss 转场不用重写。
+ * 2 线负责空间与视觉表现，不维护 Mission 剧情秒表。滚动倍率、基地清除强度、
+ * GOLIATH 准备进度等都由 Director / Sequence 的单一时间源转换后显式传入。
  */
 @ccclass('StarField')
 export class StarField extends Component {
@@ -38,7 +40,12 @@ export class StarField extends Component {
     private speedTarget = 1;
     private speedTransitionElapsed = 0;
     private speedTransitionDuration = 0;
-    private elapsed = 0;
+
+    // 只用于灯光 / 推进器 / 震颤的连续视觉相位，不参与任何 Mission cue 判定。
+    private visualPhase = 0;
+    private presentationState: Mission01EnvironmentPresentationState = {
+        ...DEFAULT_MISSION01_ENVIRONMENT_STATE,
+    };
 
     private goliathGroundNode: Node | null = null;
     private goliathArtNode: Node | null = null;
@@ -49,6 +56,7 @@ export class StarField extends Component {
     start() {
         this.buildAirbase();
         this.clouds = this.node.children.filter((n) => n.name.startsWith('Cloud'));
+        this.updateGoliathPresentation();
     }
 
     /** Mission Timeline 只控制倍率，不直接操作每个背景节点。 */
@@ -70,6 +78,29 @@ export class StarField extends Component {
 
     public getScrollSpeedScale(): number {
         return this.speedScale;
+    }
+
+    /**
+     * Director / Sequence 的适配层可以只传本次改变的字段。
+     * StarField 保存的是表现状态，不累计 Mission 时间，也不根据秒数自行切剧情。
+     */
+    public setEnvironmentPresentationState(
+        next: Partial<Mission01EnvironmentPresentationState>,
+    ) {
+        const previousPurge = this.presentationState.purgeIntensity;
+        this.presentationState = normalizeMission01EnvironmentState({
+            ...this.presentationState,
+            ...next,
+        });
+        this.updateGoliathPresentation();
+
+        if (Math.abs(previousPurge - this.presentationState.purgeIntensity) >= 0.01) {
+            this.redrawBasePurgePanel();
+        }
+    }
+
+    public getEnvironmentPresentationState(): Readonly<Mission01EnvironmentPresentationState> {
+        return this.presentationState;
     }
 
     public getGroundPanels(): readonly Node[] {
@@ -109,7 +140,7 @@ export class StarField extends Component {
 
     update(dt: number) {
         dt = Math.min(dt, 1 / 20);
-        this.elapsed += dt;
+        this.visualPhase += dt;
         this.updateSpeedTransition(dt);
         this.updateGoliathPresentation();
 
@@ -135,13 +166,22 @@ export class StarField extends Component {
     }
 
     private updateGoliathPresentation() {
-        if (!this.goliathGroundNode || this.elapsed < GOLIATH_PREPARE_TIME) return;
+        if (!this.goliathGroundNode) return;
 
-        const duration = Math.max(0.1, MISSION01_BOSS_TIME - GOLIATH_PREPARE_TIME);
-        const raw = Math.max(0, Math.min(1, (this.elapsed - GOLIATH_PREPARE_TIME) / duration));
+        const raw = this.presentationState.goliathPrepareProgress;
         const t = raw * raw * (3 - 2 * raw);
-        const rumble = Math.min(1, (this.elapsed - GOLIATH_PREPARE_TIME) / 1.6);
-        const jitterX = Math.sin(this.elapsed * 42) * 2.2 * rumble * (1 - t * 0.55);
+
+        if (raw <= 0) {
+            this.goliathGroundNode.setPosition(0, GOLIATH_BASE_Y, 0);
+            this.goliathArtNode?.setScale(0.90, 0.90, 1);
+            this.goliathShadowNode?.setScale(1, 1, 1);
+            if (this.goliathShadowOpacity) this.goliathShadowOpacity.opacity = 118;
+            if (this.goliathThrusterOpacity) this.goliathThrusterOpacity.opacity = 0;
+            return;
+        }
+
+        const rumble = Math.min(1, raw * 5);
+        const jitterX = Math.sin(this.visualPhase * 42) * 2.2 * rumble * (1 - t * 0.55);
         const lift = 118 * t;
 
         this.goliathGroundNode.setPosition(jitterX, GOLIATH_BASE_Y + lift, 0);
@@ -154,7 +194,7 @@ export class StarField extends Component {
             this.goliathShadowOpacity.opacity = Math.round(118 * (1 - t * 0.82));
         }
         if (this.goliathThrusterOpacity) {
-            const pulse = 0.82 + Math.sin(this.elapsed * 23) * 0.18;
+            const pulse = 0.82 + Math.sin(this.visualPhase * 23) * 0.18;
             this.goliathThrusterOpacity.opacity = Math.round((55 + t * 190) * pulse);
         }
     }
@@ -165,8 +205,8 @@ export class StarField extends Component {
             .sort((a, b) => a.name.localeCompare(b.name));
 
         while (existingGround.length < PROCEDURAL_PANEL_COUNT) {
-            const suffix = String.fromCharCode(65 + existingGround.length);
-            const panel = new Node(`Ground${suffix}`);
+            const definition = MISSION01_ENVIRONMENT_STAGES[existingGround.length];
+            const panel = new Node(definition.panelName);
             panel.layer = this.node.layer;
             this.node.addChild(panel);
             panel.addComponent(UITransform).setContentSize(VIEW_WIDTH, PANEL_HEIGHT);
@@ -177,6 +217,7 @@ export class StarField extends Component {
 
         for (let i = 0; i < this.ground.length; i += 1) {
             const panel = this.ground[i];
+            panel.name = MISSION01_ENVIRONMENT_STAGES[i].panelName;
             panel.setPosition(0, i * PANEL_HEIGHT, 0);
 
             const transform = panel.getComponent(UITransform) ?? panel.addComponent(UITransform);
@@ -200,13 +241,13 @@ export class StarField extends Component {
                 this.drawMainRunway(g);
                 break;
             case 2:
-                this.drawCoastalExit(g);
-                break;
-            case 3:
                 this.drawHarborDefense(g);
                 break;
-            case 4:
+            case 3:
                 this.drawLogisticsZone(g);
+                break;
+            case 4:
+                this.drawBasePurgeZone(g, this.presentationState.purgeIntensity);
                 break;
             default:
                 this.drawGoliathZone(g);
@@ -215,7 +256,7 @@ export class StarField extends Component {
         }
     }
 
-    // ---------- 0：起飞坪 ----------
+    // ---------- BG01：起飞基地 / 跑道与机库 ----------
 
     private drawLaunchApron(g: Graphics) {
         this.fillRect(g, -375, -667, 750, 1334, this.color(23, 38, 45));
@@ -233,6 +274,7 @@ export class StarField extends Component {
         this.drawRunwayMarks(g, -115, 660, 105);
         this.drawRunwayLights(g, -164, 164, -120, 650, 92);
 
+        // 对称机库 / 维护区沿边缘布置，参考海岸空军基地的秩序感，中央跑道不塞高频细节。
         this.drawHangar(g, -303, -500, 128, 192);
         this.drawHangar(g, 175, -490, 128, 188);
         this.drawHangar(g, -303, -205, 126, 170);
@@ -244,31 +286,12 @@ export class StarField extends Component {
         this.drawPerimeter(g, -348, 348, -650, 650);
     }
 
-    // ---------- 1：主跑道 ----------
-
+    // 兼容旧结构检查；BG02 已从“纯主跑道”升级为海岸撤离走廊。
     private drawMainRunway(g: Graphics) {
-        this.fillRect(g, -375, -667, 750, 1334, this.color(25, 42, 47));
-        this.fillRect(g, -345, -667, 690, 1334, this.color(53, 66, 67));
-        this.drawConcreteGrid(g, -345, -667, 690, 1334, 138, 112);
-
-        this.fillRect(g, -166, -667, 332, 1334, this.color(30, 39, 42));
-        this.fillRect(g, -178, -667, 12, 1334, this.color(66, 76, 77));
-        this.fillRect(g, 166, -667, 12, 1334, this.color(66, 76, 77));
-        this.drawRunwayMarks(g, -650, 660, 116);
-        this.drawRunwayLights(g, -166, 166, -650, 650, 92);
-        this.drawTaxiCrossing(g, -315);
-        this.drawTaxiCrossing(g, 330);
-
-        this.drawServiceBay(g, -321, -555, 132, 250, false);
-        this.drawServiceBay(g, 189, -555, 132, 250, true);
-        this.drawHangar(g, -321, -130, 132, 205);
-        this.drawHangar(g, 189, -130, 132, 205);
-        this.drawTankCluster(g, -286, 410, 3);
-        this.drawServiceBay(g, 195, 405, 118, 205, false);
-        this.drawPerimeter(g, -348, 348, -650, 650);
+        this.drawCoastalExit(g);
     }
 
-    // ---------- 2：基地边界 -> 海岸 ----------
+    // ---------- BG02：海岸撤离走廊 ----------
 
     private drawCoastalExit(g: Graphics) {
         this.fillRect(g, -375, -667, 750, 1334, this.color(22, 39, 44));
@@ -276,6 +299,7 @@ export class StarField extends Component {
         this.drawConcreteGrid(g, -345, -667, 690, 790, 132, 108);
         this.drawWater(g, 123, 544);
 
+        // 跑道逐步退出，留下清晰的沿海飞行走廊。
         this.fillRect(g, -166, -667, 332, 720, this.color(30, 39, 42));
         this.fillRect(g, -178, -667, 12, 720, this.color(66, 76, 77));
         this.fillRect(g, 166, -667, 12, 720, this.color(66, 76, 77));
@@ -294,7 +318,7 @@ export class StarField extends Component {
         this.drawPerimeter(g, -348, 348, -650, 90);
     }
 
-    // ---------- 3：港区防御带 ----------
+    // ---------- BG03：港区防御带 ----------
 
     private drawHarborDefense(g: Graphics) {
         this.fillRect(g, -375, -667, 750, 1334, this.color(18, 49, 60));
@@ -318,7 +342,7 @@ export class StarField extends Component {
         this.drawBeacon(g, 205, -560);
     }
 
-    // ---------- 4：撤离后勤区 / 基地受损 ----------
+    // ---------- BG04：撤离后勤区 ----------
 
     private drawLogisticsZone(g: Graphics) {
         this.fillRect(g, -375, -667, 750, 1334, this.color(19, 49, 58));
@@ -337,14 +361,58 @@ export class StarField extends Component {
         this.drawServiceBay(g, 168, -90, 118, 235, true);
         this.drawHangar(g, -286, 315, 120, 180);
         this.drawServiceBay(g, 170, 330, 116, 205, false);
-
-        // 静态烧蚀/爆坑只放在边缘；动态火烟仍由 FX 系统负责。
-        this.drawBlastScar(g, -226, 125, 42);
-        this.drawBlastScar(g, 232, 215, 34);
-        this.drawBlastScar(g, -252, 555, 28);
     }
 
-    // ---------- 5：GOLIATH 战区 ----------
+    // ---------- BG05：基地崩溃 / 己方防御清除 ----------
+
+    private drawBasePurgeZone(g: Graphics, purgeIntensity: number) {
+        this.fillRect(g, -375, -667, 750, 1334, this.color(24, 40, 44));
+        this.fillRect(g, -345, -667, 690, 1334, this.color(49, 61, 62));
+        this.drawConcreteGrid(g, -345, -667, 690, 1334, 138, 112);
+
+        // 保留一条熟悉的基地道路/跑道轴线，确保视觉上仍是 BG01 的同一座基地。
+        this.fillRect(g, -150, -667, 300, 1334, this.color(32, 42, 45));
+        this.strokeLine(g, -162, -650, -162, 650, 3, this.color(72, 80, 78, 105));
+        this.strokeLine(g, 162, -650, 162, 650, 3, this.color(72, 80, 78, 105));
+        this.drawRunwayMarks(g, -650, 650, 132);
+
+        this.drawHangar(g, -318, -520, 132, 215);
+        this.drawServiceBay(g, 188, -530, 130, 225, true);
+        this.drawDefensePad(g, -272, -120);
+        this.drawDefensePad(g, 272, -90);
+        this.drawServiceBay(g, -318, 265, 130, 230, false);
+        this.drawHangar(g, 188, 285, 130, 205);
+        this.drawTankCluster(g, -280, 545, 2);
+
+        // 破坏只发生在边缘设施，中央弹幕区始终保持清晰。
+        if (purgeIntensity >= 0.15) {
+            this.drawBlastScar(g, -250, -370, 32);
+            this.drawBlastScar(g, 252, 355, 28);
+        }
+        if (purgeIntensity >= 0.40) {
+            this.drawBlastScar(g, 286, -140, 44);
+            this.drawDamageGlow(g, -282, 300, 34, purgeIntensity);
+        }
+        if (purgeIntensity >= 0.65) {
+            this.drawBlastScar(g, -270, 70, 48);
+            this.drawDamageGlow(g, 265, -470, 38, purgeIntensity);
+        }
+        if (purgeIntensity >= 0.85) {
+            this.drawBlastScar(g, 250, 535, 36);
+            this.drawDamageGlow(g, -245, -520, 44, purgeIntensity);
+        }
+    }
+
+    private redrawBasePurgePanel() {
+        const panel = this.ground[4];
+        if (!panel) return;
+        const graphics = panel.getComponent(Graphics);
+        if (!graphics) return;
+        graphics.clear();
+        this.drawBasePurgeZone(graphics, this.presentationState.purgeIntensity);
+    }
+
+    // ---------- BG06：GOLIATH 战区 / 平台区 ----------
 
     private drawGoliathZone(g: Graphics) {
         this.fillRect(g, -375, -667, 750, 1334, this.color(17, 45, 55));
@@ -446,6 +514,16 @@ export class StarField extends Component {
         g.lineWidth = 3;
         g.circle(x, y, radius + 7);
         g.stroke();
+    }
+
+    private drawDamageGlow(g: Graphics, x: number, y: number, radius: number, intensity: number) {
+        const alpha = Math.round(55 + Math.max(0, Math.min(1, intensity)) * 80);
+        g.fillColor = this.color(150, 65, 38, alpha);
+        g.circle(x, y, radius);
+        g.fill();
+        g.fillColor = this.color(235, 118, 52, Math.round(alpha * 0.65));
+        g.circle(x, y, radius * 0.42);
+        g.fill();
     }
 
     private drawConcreteGrid(g: Graphics, x: number, y: number, width: number, height: number, cellW: number, cellH: number) {
