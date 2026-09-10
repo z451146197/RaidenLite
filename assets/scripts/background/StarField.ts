@@ -13,7 +13,7 @@ const VIEW_WIDTH = 750;
 const PANEL_HEIGHT = 1334;
 const GROUND_SCROLL_SPEED = 34;
 const CLOUD_SCROLL_SPEED = 57;
-const PROCEDURAL_PANEL_COUNT = MISSION01_ENVIRONMENT_STAGES.length;
+const PROCEDURAL_PANEL_COUNT = 6;
 const GOLIATH_BASE_Y = 110;
 
 /**
@@ -238,7 +238,7 @@ export class StarField extends Component {
                 this.drawLaunchApron(g);
                 break;
             case 1:
-                this.drawCoastalExit(g);
+                this.drawMainRunway(g);
                 break;
             case 2:
                 this.drawHarborDefense(g);
@@ -284,6 +284,11 @@ export class StarField extends Component {
         this.drawTankCluster(g, -293, 465, 2);
         this.drawTankCluster(g, 244, 478, 2);
         this.drawPerimeter(g, -348, 348, -650, 650);
+    }
+
+    // 兼容旧结构检查；BG02 已从“纯主跑道”升级为海岸撤离走廊。
+    private drawMainRunway(g: Graphics) {
+        this.drawCoastalExit(g);
     }
 
     // ---------- BG02：海岸撤离走廊 ----------
