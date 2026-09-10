@@ -1,6 +1,10 @@
 import { _decorator, Color, Component, Graphics, Node, Sprite, UIOpacity, UITransform } from 'cc';
 import { applyArtSprite } from '../game/ArtUtil';
-import { MISSION01_BOSS_TIME, MISSION01_TIMELINE } from '../game/Mission01Timeline';
+import {
+    DEFAULT_MISSION01_ENVIRONMENT_STATE,
+    Mission01EnvironmentPresentationState,
+    normalizeMission01EnvironmentState,
+} from './Mission01EnvironmentState';
 
 const { ccclass } = _decorator;
 
@@ -10,9 +14,6 @@ const GROUND_SCROLL_SPEED = 34;
 const CLOUD_SCROLL_SPEED = 57;
 const PROCEDURAL_PANEL_COUNT = 6;
 const GOLIATH_BASE_Y = 110;
-const GOLIATH_PREPARE_TIME = MISSION01_TIMELINE.find(
-    (event) => event.kind === 'STORY' && event.cue === 'BOSS_PREPARE',
-)?.time ?? 133;
 
 /**
  * Mission 01 连续程序化背景。
@@ -25,8 +26,8 @@ const GOLIATH_PREPARE_TIME = MISSION01_TIMELINE.find(
  * 4 撤离后勤区 / 受损基地
  * 5 GOLIATH 平台
  *
- * 1/2 线的正式背景素材落库后，只需要替换各 Ground 面板的视觉内容，
- * 时间轴、滚动、GOLIATH 挂点与 Boss 转场不用重写。
+ * 2 线负责空间与视觉表现，不维护 Mission 剧情秒表。滚动倍率、基地清除强度、
+ * GOLIATH 准备进度等都由 Director / Sequence 的单一时间源转换后显式传入。
  */
 @ccclass('StarField')
 export class StarField extends Component {
@@ -38,7 +39,12 @@ export class StarField extends Component {
     private speedTarget = 1;
     private speedTransitionElapsed = 0;
     private speedTransitionDuration = 0;
-    private elapsed = 0;
+
+    // 只用于灯光 / 推进器 / 震颤的连续视觉相位，不参与任何 Mission cue 判定。
+    private visualPhase = 0;
+    private presentationState: Mission01EnvironmentPresentationState = {
+        ...DEFAULT_MISSION01_ENVIRONMENT_STATE,
+    };
 
     private goliathGroundNode: Node | null = null;
     private goliathArtNode: Node | null = null;
@@ -49,6 +55,7 @@ export class StarField extends Component {
     start() {
         this.buildAirbase();
         this.clouds = this.node.children.filter((n) => n.name.startsWith('Cloud'));
+        this.updateGoliathPresentation();
     }
 
     /** Mission Timeline 只控制倍率，不直接操作每个背景节点。 */
@@ -70,6 +77,24 @@ export class StarField extends Component {
 
     public getScrollSpeedScale(): number {
         return this.speedScale;
+    }
+
+    /**
+     * Director / Sequence 的适配层可以只传本次改变的字段。
+     * StarField 保存的是表现状态，不累计 Mission 时间，也不根据秒数自行切剧情。
+     */
+    public setEnvironmentPresentationState(
+        next: Partial<Mission01EnvironmentPresentationState>,
+    ) {
+        this.presentationState = normalizeMission01EnvironmentState({
+            ...this.presentationState,
+            ...next,
+        });
+        this.updateGoliathPresentation();
+    }
+
+    public getEnvironmentPresentationState(): Readonly<Mission01EnvironmentPresentationState> {
+        return this.presentationState;
     }
 
     public getGroundPanels(): readonly Node[] {
@@ -109,7 +134,7 @@ export class StarField extends Component {
 
     update(dt: number) {
         dt = Math.min(dt, 1 / 20);
-        this.elapsed += dt;
+        this.visualPhase += dt;
         this.updateSpeedTransition(dt);
         this.updateGoliathPresentation();
 
@@ -135,13 +160,22 @@ export class StarField extends Component {
     }
 
     private updateGoliathPresentation() {
-        if (!this.goliathGroundNode || this.elapsed < GOLIATH_PREPARE_TIME) return;
+        if (!this.goliathGroundNode) return;
 
-        const duration = Math.max(0.1, MISSION01_BOSS_TIME - GOLIATH_PREPARE_TIME);
-        const raw = Math.max(0, Math.min(1, (this.elapsed - GOLIATH_PREPARE_TIME) / duration));
+        const raw = this.presentationState.goliathPrepareProgress;
         const t = raw * raw * (3 - 2 * raw);
-        const rumble = Math.min(1, (this.elapsed - GOLIATH_PREPARE_TIME) / 1.6);
-        const jitterX = Math.sin(this.elapsed * 42) * 2.2 * rumble * (1 - t * 0.55);
+
+        if (raw <= 0) {
+            this.goliathGroundNode.setPosition(0, GOLIATH_BASE_Y, 0);
+            this.goliathArtNode?.setScale(0.90, 0.90, 1);
+            this.goliathShadowNode?.setScale(1, 1, 1);
+            if (this.goliathShadowOpacity) this.goliathShadowOpacity.opacity = 118;
+            if (this.goliathThrusterOpacity) this.goliathThrusterOpacity.opacity = 0;
+            return;
+        }
+
+        const rumble = Math.min(1, raw * 5);
+        const jitterX = Math.sin(this.visualPhase * 42) * 2.2 * rumble * (1 - t * 0.55);
         const lift = 118 * t;
 
         this.goliathGroundNode.setPosition(jitterX, GOLIATH_BASE_Y + lift, 0);
@@ -154,7 +188,7 @@ export class StarField extends Component {
             this.goliathShadowOpacity.opacity = Math.round(118 * (1 - t * 0.82));
         }
         if (this.goliathThrusterOpacity) {
-            const pulse = 0.82 + Math.sin(this.elapsed * 23) * 0.18;
+            const pulse = 0.82 + Math.sin(this.visualPhase * 23) * 0.18;
             this.goliathThrusterOpacity.opacity = Math.round((55 + t * 190) * pulse);
         }
     }
