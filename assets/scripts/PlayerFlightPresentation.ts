@@ -1,51 +1,37 @@
 import { _decorator, Color, Component, Graphics, Node, UIOpacity, UITransform } from 'cc';
-import { MISSION01_TIMELINE, Mission01StoryCue } from './game/Mission01Timeline';
+import { MISSION01_DIRECTOR } from './game/Mission01Director';
+import { MISSION01_SEQUENCES } from './game/Mission01Timeline';
 
 const { ccclass } = _decorator;
 
-function clamp01(value: number) {
-    return Math.max(0, Math.min(1, value));
-}
-
 function smoothstep(value: number) {
-    const t = clamp01(value);
+    const t = Math.max(0, Math.min(1, value));
     return t * t * (3 - 2 * t);
 }
 
-function storyTime(cue: Mission01StoryCue, fallback: number) {
-    const event = MISSION01_TIMELINE.find((item) => item.kind === 'STORY' && item.cue === cue);
-    return event?.time ?? fallback;
-}
-
 /**
- * AURORA 的 V1 飞行演出层。
+ * AURORA 的纯表现层。
  *
- * 不切换机体帧：地面/滑跑/离地/巡航全部由阴影、尾焰、轻微缩放和既有背景速度共同完成。
- * 本组件只负责视觉，不改变玩家碰撞盒、输入或武器逻辑。
+ * 剧情时间只读取 Mission01Director；本组件不再维护 elapsed，也不复制任何秒点。
+ * 地面 / 滑跑 / 离地 / 巡航全部由静态机体 + 阴影 + 尾焰 + 轻微缩放完成。
  */
 @ccclass('PlayerFlightPresentation')
 export class PlayerFlightPresentation extends Component {
-    private elapsed = 0;
     private shadowNode: Node | null = null;
     private shadowOpacity: UIOpacity | null = null;
     private thrusterNode: Node | null = null;
     private thrusterOpacity: UIOpacity | null = null;
     private artNode: Node | null = null;
 
-    private readonly formationTime = storyTime('FORMATION_RUNWAY', 6);
-    private readonly takeoffTime = storyTime('TAKEOFF', 14);
-    private readonly controlTime = storyTime('PLAYER_CONTROL', 24);
-
     start() {
         this.artNode = this.node.getChildByName('__PlayerArt');
         this.buildShadow();
         this.buildThruster();
-        this.applyFlightState(0);
+        this.applyFlightState();
     }
 
-    update(dt: number) {
-        this.elapsed += Math.min(dt, 1 / 20);
-        this.applyFlightState(this.elapsed);
+    update() {
+        this.applyFlightState();
     }
 
     private buildShadow() {
@@ -61,8 +47,6 @@ export class PlayerFlightPresentation extends Component {
         graphics.ellipse(0, 0, 39, 76);
         graphics.fill();
         this.shadowOpacity = shadow.addComponent(UIOpacity);
-
-        // 插到玩家节点之前，保证阴影永远在机体下方。
         shadow.setSiblingIndex(this.node.getSiblingIndex());
         this.shadowNode = shadow;
     }
@@ -93,7 +77,14 @@ export class PlayerFlightPresentation extends Component {
         this.thrusterNode = thruster;
     }
 
-    private applyFlightState(time: number) {
+    private applyFlightState() {
+        const time = MISSION01_DIRECTOR.time;
+        const formation = smoothstep(MISSION01_DIRECTOR.progress('FORMATION'));
+        const lift = smoothstep(MISSION01_DIRECTOR.progress('TAKEOFF'));
+        const formationStart = MISSION01_SEQUENCES.FORMATION.start;
+        const takeoffStart = MISSION01_SEQUENCES.TAKEOFF.start;
+        const airborne = time >= MISSION01_SEQUENCES.TAKEOFF.end;
+
         let shadowScale = 1;
         let shadowAlpha = 118;
         let shadowOffsetX = 8;
@@ -101,19 +92,17 @@ export class PlayerFlightPresentation extends Component {
         let artScale = 1;
         let thrusterStrength = 0.20;
 
-        if (time >= this.formationTime && time < this.takeoffTime) {
-            const rollout = smoothstep((time - this.formationTime) / Math.max(0.1, this.takeoffTime - this.formationTime));
-            thrusterStrength = 0.35 + rollout * 0.50;
-            shadowOffsetY -= rollout * 5;
-        } else if (time >= this.takeoffTime && time < this.controlTime) {
-            const lift = smoothstep((time - this.takeoffTime) / Math.max(0.1, this.controlTime - this.takeoffTime));
+        if (time >= formationStart && time < takeoffStart) {
+            thrusterStrength = 0.35 + formation * 0.50;
+            shadowOffsetY -= formation * 5;
+        } else if (time >= takeoffStart && !airborne) {
             thrusterStrength = 0.85 + lift * 0.15;
             shadowScale = 1 - lift * 0.65;
             shadowAlpha = 118 - lift * 104;
             shadowOffsetX = 8 + lift * 18;
             shadowOffsetY = -23 - lift * 34;
             artScale = 1 + lift * 0.07;
-        } else if (time >= this.controlTime) {
+        } else if (airborne) {
             shadowScale = 0.35;
             shadowAlpha = 14;
             shadowOffsetX = 26;
@@ -134,8 +123,12 @@ export class PlayerFlightPresentation extends Component {
         }
 
         if (this.thrusterNode && this.thrusterOpacity) {
-            const pulse = time >= this.formationTime ? 0.94 + Math.sin(time * 18) * 0.06 : 1;
-            this.thrusterNode.setScale(0.78 + thrusterStrength * 0.22, (0.46 + thrusterStrength * 0.70) * pulse, 1);
+            const pulse = time >= formationStart ? 0.94 + Math.sin(time * 18) * 0.06 : 1;
+            this.thrusterNode.setScale(
+                0.78 + thrusterStrength * 0.22,
+                (0.46 + thrusterStrength * 0.70) * pulse,
+                1,
+            );
             this.thrusterOpacity.opacity = Math.round(70 + thrusterStrength * 175);
         }
     }

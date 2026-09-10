@@ -60,7 +60,6 @@ export const MISSION01_TIMELINE: readonly Mission01Event[] = [
     { time: 120, kind: 'ELITE', x: 0, dropKind: 'B', heavyBullet: true },
     { time: 126, kind: 'WAVE', pattern: 'LINE', count: 8, canShoot: true },
 
-    // GroundF / GOLIATH 平台进入镜头后减速，给“背景设施 -> Boss”转场留空间。
     { time: 133, kind: 'STORY', cue: 'BOSS_PREPARE' },
     { time: 133, kind: 'SCROLL', speedScale: 0.62, transition: 3.0 },
     { time: 141, kind: 'WARNING' },
@@ -70,4 +69,28 @@ export const MISSION01_TIMELINE: readonly Mission01Event[] = [
     { time: 146, kind: 'BOSS' },
 ];
 
-export const MISSION01_BOSS_TIME = 146;
+/**
+ * 所有连续演出窗口也只从 Timeline 推导。以后调整节奏只改上面的事件秒点，
+ * Player / Wingman / GOLIATH 表现层不再各自复制一份时间常量。
+ */
+export function mission01CueTime(cue: Mission01StoryCue): number {
+    const event = MISSION01_TIMELINE.find(
+        (item): item is Extract<Mission01Event, { kind: 'STORY' }> => item.kind === 'STORY' && item.cue === cue,
+    );
+    if (!event) {
+        throw new Error(`[Mission01] missing story cue: ${cue}`);
+    }
+    return event.time;
+}
+
+export const MISSION01_SEQUENCES = {
+    FORMATION: { start: mission01CueTime('FORMATION_RUNWAY'), end: mission01CueTime('TAKEOFF') },
+    TAKEOFF: { start: mission01CueTime('TAKEOFF'), end: mission01CueTime('PLAYER_CONTROL') },
+    FALCON_INTERCEPT: { start: mission01CueTime('FALCON_TARGETED'), end: mission01CueTime('FALCON_DAMAGED') },
+    FALCON_LOSS: { start: mission01CueTime('FALCON_DAMAGED'), end: mission01CueTime('FALCON_DESTROYED') },
+    GOLIATH_PREPARE: { start: mission01CueTime('BOSS_PREPARE'), end: mission01CueTime('GOLIATH_ENTER') },
+    VIPER_WITHDRAW: { start: mission01CueTime('VIPER_DAMAGED'), end: mission01CueTime('GOLIATH_ENTER') },
+} as const;
+
+export type Mission01SequenceId = keyof typeof MISSION01_SEQUENCES;
+export const MISSION01_BOSS_TIME = mission01CueTime('GOLIATH_ENTER');
