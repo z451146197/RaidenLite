@@ -1,0 +1,85 @@
+name: Validate Mission 01 Director Core
+
+on:
+  push:
+    branches: [test/mission01-director-core-ci]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mission01-director-core-ci
+  cancel-in-progress: true
+
+jobs:
+  validate-and-build:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout game project
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+          cache: npm
+          cache-dependency-path: package.json
+
+      - name: Validate project sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node tools/check-project.cjs
+          node tools/check-mission01.cjs
+          node tools/check-mission01-director-core.cjs
+
+      - name: Restore Cocos CLI cache
+        id: cocos-cli-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/cocos-cli
+          key: cocos-cli-${{ runner.os }}-0.0.1-alpha.35-v1
+
+      - name: Install Cocos CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          CLI_DIR="$RUNNER_TEMP/cocos-cli"
+          if [ "${{ steps.cocos-cli-cache.outputs.cache-hit }}" != "true" ] || [ ! -f "$CLI_DIR/dist/cli.js" ]; then
+            rm -rf "$CLI_DIR"
+            git clone --depth 1 --branch 0.0.1-alpha.35 https://github.com/cocos/cocos-cli.git "$CLI_DIR"
+            cd "$CLI_DIR"
+            npm install -g node-gyp
+            npm run init
+            npm install
+            npm run download-tools
+            npm run build
+          else
+            cd "$CLI_DIR"
+            echo "Using cached Cocos CLI build."
+          fi
+          chmod +x dist/cli.js
+          npm link
+          chmod +x "$(npm prefix -g)/bin/cocos" || true
+          cocos --version || cocos --help
+
+      - name: Build Web Mobile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf build/web-mobile
+          if ! cocos --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile --config "$GITHUB_WORKSPACE/tools/build-preview.json"; then
+            echo "Config-file build failed; retrying with project/platform defaults."
+            rm -rf build/web-mobile
+            cocos --no-interactive build --project "$GITHUB_WORKSPACE" --platform web-mobile
+          fi
+          test -f build/web-mobile/index.html
+
+      - name: Keep validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mission01-director-core-web-mobile
+          path: build/web-mobile
+          if-no-files-found: error
