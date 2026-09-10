@@ -27,7 +27,8 @@ import { PowerItem, ItemKind } from '../item/PowerItem';
 import { Explosion } from '../effect/Explosion';
 import { StarField } from '../background/StarField';
 import { registerArtFrames, applyArtSprite } from './ArtUtil';
-import { MISSION01_TIMELINE, Mission01Event, Mission01StoryCue } from './Mission01Timeline';
+import { MISSION01_DIRECTOR } from './Mission01Director';
+import { Mission01Event, Mission01StoryCue } from './Mission01Timeline';
 
 const { ccclass, property, executionOrder } = _decorator;
 
@@ -55,11 +56,10 @@ export class GameManager extends Component {
     private assetsReady = false;
     private restarting = false;
     private score = 0;
-    private levelTime = 0;
-    private nextLevelEvent = 0;
     private playerControlEnabled = false;
     private playerAutoFireEnabled = false;
     private background: StarField | null = null;
+    private stopMissionListener: (() => void) | null = null;
 
     private currentWeapon: WeaponKind = 'NORMAL';
     private spreadUnlocked = false;
@@ -139,6 +139,10 @@ export class GameManager extends Component {
             console.warn('[RaidenLite] 未找到 StarField，Mission 01 背景速度事件将被忽略。');
         }
 
+        // GameManager 不再维护关卡秒表/事件游标，只消费 Director 发出的离散事件。
+        this.stopMissionListener?.();
+        this.stopMissionListener = MISSION01_DIRECTOR.onEvent((event) => this.handleMission01Event(event));
+
         this.playerControlEnabled = false;
         this.playerAutoFireEnabled = false;
         this.invulnerableTimer = 2;
@@ -157,7 +161,7 @@ export class GameManager extends Component {
     }
 
     update(deltaTime: number) {
-        // 切回前台时不补算数秒的弹幕和波次。
+        // 切回前台时不补算数秒的弹幕和波次；Mission01Director 使用同样的单帧上限。
         deltaTime = Math.min(deltaTime, 1 / 20);
         this.updateTransientUI(deltaTime);
         this.updateScreenShake(deltaTime);
@@ -178,9 +182,6 @@ export class GameManager extends Component {
         if (this.overdriveTimer > 0) {
             this.overdriveTimer -= deltaTime;
         }
-
-        this.levelTime += deltaTime;
-        this.runLevelTimeline();
 
         if (this.playerAutoFireEnabled) {
             this.shootTimer += deltaTime;
@@ -205,18 +206,7 @@ export class GameManager extends Component {
         this.checkPlayerDamage();
     }
 
-    // ---------- 第一关时间轴 ----------
-
-    private runLevelTimeline() {
-        while (this.nextLevelEvent < MISSION01_TIMELINE.length) {
-            const event = MISSION01_TIMELINE[this.nextLevelEvent];
-            if (this.levelTime < event.time) {
-                break;
-            }
-            this.nextLevelEvent += 1;
-            this.handleMission01Event(event);
-        }
-    }
+    // ---------- Mission 01 离散事件消费 ----------
 
     private handleMission01Event(event: Mission01Event) {
         switch (event.kind) {
@@ -292,8 +282,9 @@ export class GameManager extends Component {
             case 'FALCON_TARGETED':
             case 'FALCON_DAMAGED':
             case 'FALCON_DESTROYED':
-                // 僚机节点还未接入场景；先保留标准 cue，避免在 GameManager 里硬编码未来演出。
-                console.info(`[Mission01] pending wingman cue: ${cue}`);
+            case 'VIPER_DAMAGED':
+                // 僚机视觉由 Mission01Wingmen 读取同一个 Director；GameManager 不重复硬编码。
+                console.info(`[Mission01] wingman cue: ${cue}`);
                 break;
         }
     }
@@ -1181,5 +1172,10 @@ export class GameManager extends Component {
         }
         const low = ratio < 0.3;
         this.bossHpBarFill.color = low ? new Color(255, 200, 120, 255) : new Color(255, 96, 80, 255);
+    }
+
+    onDestroy() {
+        this.stopMissionListener?.();
+        this.stopMissionListener = null;
     }
 }
